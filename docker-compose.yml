@@ -1,0 +1,69 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: seere_yaana_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: seere_yaana_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d seere_yaana_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: seere_yaana_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/seere_yaana_db?schema=public
+      PORT: 4000
+    ports:
+      - "4000:4000"
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        AUTH_URL: ${AUTH_URL}
+        AUTH_SECRET: ${AUTH_SECRET}
+        API_INTERNAL_URL: ${API_INTERNAL_URL}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+        FACEBOOK_CLIENT_ID: ${FACEBOOK_CLIENT_ID}
+        FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET}
+        AUTH_APPLE_ID: ${AUTH_APPLE_ID}
+        AUTH_APPLE_SECRET: ${AUTH_APPLE_SECRET}
+    container_name: seere_yaana_web
+    restart: unless-stopped
+    depends_on:
+      - api
+    env_file:
+      - .env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      API_INTERNAL_URL: http://api:4000
+      NEXT_PUBLIC_RAZORPAY_KEY_ID: ${NEXT_PUBLIC_RAZORPAY_KEY_ID}
+      NEXT_PUBLIC_BRAND_LOGO: ${NEXT_PUBLIC_BRAND_LOGO}
+    ports:
+      - "3445:3000"
+
+volumes:
+  postgres_data:

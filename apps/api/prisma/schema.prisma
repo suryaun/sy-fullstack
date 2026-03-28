@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StockStatus {
+  IN_STOCK
+  SOLD_OUT
+}
+
+enum Material {
+  SILK
+  CHIFFON
+  COTTON
+  GEORGETTE
+  ORGANZA
+  LINEN
+  CREPE
+  SATIN
+}
+
+enum Craft {
+  BANARASI
+  KANJEEVARAM
+  BANDHANI
+  CHIKANKARI
+  PAITHANI
+  PATOLA
+  JAMDANI
+  TUSSAR
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+enum BackInStockStatus {
+  ACTIVE
+  NOTIFIED
+  CANCELLED
+}
+
+model Product {
+  id              String      @id @default(cuid())
+  name            String
+  description     String
+  fabric          Material
+  craft           Craft
+  lengthInMeters  Float
+  blouseIncluded  Boolean     @default(false)
+  priceInPaise    Int
+  stockStatus     StockStatus @default(IN_STOCK)
+  imageUrl        String
+  imagePublicId   String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  orderItems      OrderItem[]
+  colors          ProductColor[]
+  images          ProductImage[]
+  notifyRequests  BackInStockRequest[]
+
+  @@index([stockStatus])
+}
+
+model ProductImage {
+  id              String      @id @default(cuid())
+  productId       String
+  imageUrl        String
+  imagePublicId   String?
+  sortOrder       Int         @default(0)
+  createdAt       DateTime    @default(now())
+
+  product         Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, sortOrder])
+}
+
+model ProductColor {
+  id              String               @id @default(cuid())
+  productId       String
+  name            String
+  colorCode       String?
+  isDefault       Boolean              @default(false)
+  stockQuantity   Int                  @default(0)
+  priceInPaise    Int?
+  isActive        Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  product         Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  images          ProductColorImage[]
+  notifyRequests  BackInStockRequest[]
+
+  @@unique([productId, name])
+  @@index([productId, isDefault])
+  @@index([productId, stockQuantity])
+}
+
+model ProductColorImage {
+  id              String        @id @default(cuid())
+  productColorId  String
+  imageUrl        String
+  imagePublicId   String?
+  sortOrder       Int           @default(0)
+  createdAt       DateTime      @default(now())
+
+  productColor    ProductColor  @relation(fields: [productColorId], references: [id], onDelete: Cascade)
+
+  @@index([productColorId, sortOrder])
+}
+
+model Order {
+  id                String      @id @default(cuid())
+  razorpayOrderId   String?     @unique
+  razorpayPaymentId String?     @unique
+  razorpaySignature String?
+  status            OrderStatus @default(PENDING)
+  amountInPaise     Int
+  currency          String      @default("INR")
+  customerName      String
+  customerEmail     String
+  customerPhone     String
+  notes             Json?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  items             OrderItem[]
+
+  @@index([status])
+}
+
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String
+  productId   String
+  quantity    Int      @default(1)
+  priceAtTime Int
+
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model AdminUser {
+  id            String   @id @default(cuid())
+  fullName      String
+  email         String   @unique
+  passwordHash  String
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model CustomerUser {
+  id              String      @id @default(cuid())
+  mobile          String      @unique
+  fullName        String?
+  email           String?
+  profileComplete Boolean     @default(false)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  otps            MobileOtp[]
+  backInStockRequests BackInStockRequest[]
+
+  @@index([mobile])
+}
+
+model BackInStockRequest {
+  id              String            @id @default(cuid())
+  customerId      String
+  productId       String
+  productColorId  String
+  status          BackInStockStatus @default(ACTIVE)
+  requestedAt     DateTime          @default(now())
+  notifiedAt      DateTime?
+  cancelledAt     DateTime?
+
+  customer        CustomerUser      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product         Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productColor    ProductColor      @relation(fields: [productColorId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, productId, productColorId])
+  @@index([productColorId, status])
+  @@index([productId, status])
+}
+
+model MobileOtp {
+  id          String        @id @default(cuid())
+  mobile      String
+  codeHash    String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime      @default(now())
+  customerId  String?
+
+  customer    CustomerUser? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([mobile, createdAt])
+  @@index([expiresAt])
+}

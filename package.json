@@ -1,0 +1,12 @@
+{
+  "name": "seere-yaana-boutique-commerce",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @seere-yaana/web & npm run dev --workspace @seere-yaana/api",
+    "build": "npm run build --workspaces",
+    "start": "npm run start --workspace @seere-yaana/api"
+  }
+}
