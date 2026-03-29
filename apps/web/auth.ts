@@ -11,6 +11,7 @@ function env(name: string) {
 }
 
 const internalApiUrl = env("API_INTERNAL_URL") ?? env("NEXT_PUBLIC_API_URL") ?? "http://localhost:4000";
+const configuredAuthUrl = env("AUTH_URL") ?? env("NEXTAUTH_URL");
 
 function hasRealValue(value: string | undefined, placeholder: string) {
   return Boolean(value && value !== placeholder);
@@ -104,6 +105,52 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   providers,
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      const resolvedBaseUrl = (() => {
+        try {
+          const runtimeBase = new URL(baseUrl);
+          if (!configuredAuthUrl) {
+            return runtimeBase;
+          }
+
+          const configuredBase = new URL(configuredAuthUrl);
+          const runtimeIsLocal =
+            runtimeBase.hostname === "localhost" || runtimeBase.hostname === "127.0.0.1";
+          const configuredIsLocal =
+            configuredBase.hostname === "localhost" || configuredBase.hostname === "127.0.0.1";
+
+          return runtimeIsLocal && !configuredIsLocal
+            ? configuredBase
+            : runtimeBase;
+        } catch {
+          return new URL(baseUrl);
+        }
+      })();
+
+      if (url.startsWith("/")) {
+        return `${resolvedBaseUrl.origin}${url}`;
+      }
+
+      try {
+        const targetUrl = new URL(url);
+        if (targetUrl.origin === resolvedBaseUrl.origin) {
+          return targetUrl.toString();
+        }
+
+        const targetIsLocal =
+          targetUrl.hostname === "localhost" || targetUrl.hostname === "127.0.0.1";
+        const baseIsLocal =
+          resolvedBaseUrl.hostname === "localhost" || resolvedBaseUrl.hostname === "127.0.0.1";
+
+        if (targetIsLocal && !baseIsLocal) {
+          return `${resolvedBaseUrl.origin}${targetUrl.pathname}${targetUrl.search}${targetUrl.hash}`;
+        }
+      } catch {
+        // Fall through to safe base URL.
+      }
+
+      return resolvedBaseUrl.toString();
+    },
     async jwt({ token, account, user }) {
       if (account?.provider) {
         (token as { provider?: string }).provider = account.provider;

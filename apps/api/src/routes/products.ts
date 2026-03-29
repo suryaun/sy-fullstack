@@ -8,6 +8,23 @@ function asSingle(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+router.get("/", async (_req, res) => {
+  const products = await prisma.product.findMany({
+    orderBy: { createdAt: "desc" },
+    include: {
+      images: {
+        orderBy: { sortOrder: "asc" },
+        select: {
+          imageUrl: true,
+          sortOrder: true
+        }
+      }
+    }
+  });
+
+  return res.json(products);
+});
+
 router.get("/:id", async (req, res) => {
   const productId = asSingle(req.params.id);
   if (!productId) {

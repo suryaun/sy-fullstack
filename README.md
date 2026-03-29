@@ -13,15 +13,30 @@ Minimalist-luxury boutique commerce stack with:
    ```bash
    cp .env.example .env
    ```
-2. Start all services:
+2. Start all services (single local compose file):
    ```bash
-   docker compose up --build
+   docker compose -f docker-compose.yaml up --build
    ```
    This uses the database name `seere_yaana_db`.
    API container runs `prisma db push` on startup to keep schema in sync.
 3. API: http://localhost:4000
 4. Web: http://localhost:3445
 5. PostgreSQL host port: 5435
+
+### Local Development Commands
+
+- Start local development stack:
+   ```bash
+   docker compose -f docker-compose.yaml up --build
+   ```
+- Start in background:
+   ```bash
+   docker compose -f docker-compose.yaml up --build -d
+   ```
+- Stop local development stack:
+   ```bash
+   docker compose -f docker-compose.yaml down
+   ```
 
 ## Razorpay Reliability Notes
 

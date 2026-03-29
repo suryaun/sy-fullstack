@@ -17,8 +17,9 @@ type StoreContextValue = {
   cartItems: CartItem[];
   wishlistCount: number;
   cartCount: number;
-  toggleWishlist: (productId: string) => void;
-  isWishlisted: (productId: string) => boolean;
+  toggleWishlist: (productId: string, colorId?: string) => void;
+  isWishlisted: (productId: string, colorId?: string) => boolean;
+  removeWishlistByProduct: (productId: string) => void;
   addToCart: (productId: string, quantity?: number) => void;
   removeFromCart: (productId: string) => void;
   setCartQuantity: (productId: string, quantity: number) => void;
@@ -30,6 +31,14 @@ const StoreContext = createContext<StoreContextValue | null>(null);
 const WISHLIST_KEY = "seere_yaana_wishlist";
 const CART_KEY = "seere_yaana_cart";
 
+function makeWishlistKey(productId: string, colorId?: string) {
+  return `${productId}::${colorId ?? "default"}`;
+}
+
+function parseWishlistProductId(wishlistKey: string) {
+  return wishlistKey.split("::")[0] ?? wishlistKey;
+}
+
 export default function StoreProvider({ children }: { children: ReactNode }) {
   const [wishlist, setWishlist] = useState<string[]>([]);
   const [cart, setCart] = useState<CartMap>({});
@@ -40,7 +49,12 @@ export default function StoreProvider({ children }: { children: ReactNode }) {
       const savedCart = localStorage.getItem(CART_KEY);
 
       if (savedWishlist) {
-        setWishlist(JSON.parse(savedWishlist));
+        const parsed = JSON.parse(savedWishlist) as string[];
+        // Backward compatibility: migrate old product-only entries.
+        const migrated = parsed.map((entry) =>
+          entry.includes("::") ? entry : makeWishlistKey(entry),
+        );
+        setWishlist(migrated);
       }
       if (savedCart) {
         setCart(JSON.parse(savedCart));
@@ -74,14 +88,31 @@ export default function StoreProvider({ children }: { children: ReactNode }) {
         .filter((item) => item.quantity > 0),
       wishlistCount,
       cartCount,
-      toggleWishlist: (productId: string) => {
+      toggleWishlist: (productId: string, colorId?: string) => {
+        const wishlistKey = makeWishlistKey(productId, colorId);
         setWishlist((previous: string[]) =>
-          previous.includes(productId)
-            ? previous.filter((id: string) => id !== productId)
-            : [...previous, productId],
+          previous.includes(wishlistKey)
+            ? previous.filter((id: string) => id !== wishlistKey)
+            : [...previous, wishlistKey],
         );
       },
-      isWishlisted: (productId: string) => wishlist.includes(productId),
+      isWishlisted: (productId: string, colorId?: string) => {
+        if (colorId) {
+          return wishlist.includes(makeWishlistKey(productId, colorId));
+        }
+
+        return wishlist.some(
+          (wishlistKey) => parseWishlistProductId(wishlistKey) === productId,
+        );
+      },
+      removeWishlistByProduct: (productId: string) => {
+        setWishlist((previous: string[]) =>
+          previous.filter(
+            (wishlistKey: string) =>
+              parseWishlistProductId(wishlistKey) !== productId,
+          ),
+        );
+      },
       addToCart: (productId: string, quantity = 1) => {
         setCart((previous: CartMap) => {
           const nextQuantity = (previous[productId] ?? 0) + quantity;

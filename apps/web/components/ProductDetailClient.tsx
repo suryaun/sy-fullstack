@@ -2,9 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
 import PayNowButton from "@/components/PayNowButton";
 import { useStore } from "@/components/StoreProvider";
 import { getPublicApiUrl } from "@/lib/publicApiUrl";
@@ -70,6 +71,9 @@ export default function ProductDetailClient({ product }: Props) {
   >({});
   const [notifyMessage, setNotifyMessage] = useState("");
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [isCoarsePointer, setIsCoarsePointer] = useState(false);
+  const [isZoomed, setIsZoomed] = useState(false);
 
   const selectedColor = useMemo(
     () =>
@@ -104,7 +108,25 @@ export default function ProductDetailClient({ product }: Props) {
 
   useEffect(() => {
     setSelectedImageIndex(0);
+    setIsZoomed(false);
   }, [selectedColorId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(pointer: coarse)");
+    const syncPointerMode = () => {
+      setIsCoarsePointer(mediaQuery.matches);
+    };
+
+    syncPointerMode();
+    mediaQuery.addEventListener("change", syncPointerMode);
+    return () => {
+      mediaQuery.removeEventListener("change", syncPointerMode);
+    };
+  }, []);
 
   useEffect(() => {
     if (selectedImageIndex >= gallery.length) {
@@ -214,6 +236,100 @@ export default function ProductDetailClient({ product }: Props) {
     }
   };
 
+  const goToPreviousImage = useCallback(() => {
+    if (gallery.length === 0) {
+      return;
+    }
+    setSelectedImageIndex((previous) =>
+      previous === 0 ? gallery.length - 1 : previous - 1,
+    );
+  }, [gallery.length]);
+
+  const goToNextImage = useCallback(() => {
+    if (gallery.length === 0) {
+      return;
+    }
+    setSelectedImageIndex((previous) =>
+      previous === gallery.length - 1 ? 0 : previous + 1,
+    );
+  }, [gallery.length]);
+
+  useEffect(() => {
+    if (gallery.length <= 1) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTypingElement =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable;
+
+      if (isTypingElement || isZoomed) {
+        return;
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goToPreviousImage();
+        return;
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goToNextImage();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [gallery.length, goToNextImage, goToPreviousImage, isZoomed]);
+
+  const onImageTouchStart: React.TouchEventHandler<HTMLDivElement> = (
+    event,
+  ) => {
+    const touch = event.touches[0];
+    if (!touch) {
+      return;
+    }
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+
+  const onImageTouchEnd: React.TouchEventHandler<HTMLDivElement> = (event) => {
+    const touch = event.changedTouches[0];
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+
+    if (!touch || !start) {
+      return;
+    }
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    const horizontalDistance = Math.abs(deltaX);
+    const verticalDistance = Math.abs(deltaY);
+
+    // Trigger slide change only for clear horizontal swipes.
+    if (
+      isZoomed ||
+      horizontalDistance < 40 ||
+      horizontalDistance <= verticalDistance
+    ) {
+      return;
+    }
+
+    if (deltaX > 0) {
+      goToPreviousImage();
+      return;
+    }
+
+    goToNextImage();
+  };
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
       <div className="mb-6 text-sm text-[#766d66]">
@@ -225,18 +341,110 @@ export default function ProductDetailClient({ product }: Props) {
 
       <section className="grid gap-8 lg:grid-cols-2">
         <div className="space-y-4">
-          <div className="relative h-[520px] overflow-hidden rounded-2xl border border-[#e2d6c8] bg-[#f8f4ee]">
-            {gallery[selectedImageIndex] ? (
-              <Image
-                src={gallery[selectedImageIndex]}
-                alt={product.name}
-                fill
-                className="object-cover"
-                priority
-              />
-            ) : null}
+          <div
+            className="relative h-[520px] overflow-hidden rounded-2xl border border-[#e2d6c8] bg-[#f8f4ee]"
+            onTouchStart={onImageTouchStart}
+            onTouchEnd={onImageTouchEnd}
+          >
+            <TransformWrapper
+              key={`${selectedColor?.id ?? "default"}-${selectedImageIndex}`}
+              initialScale={1}
+              minScale={1}
+              maxScale={4}
+              limitToBounds
+              centerOnInit
+              smooth
+              panning={{
+                velocityDisabled: false,
+                disabled: !isZoomed,
+              }}
+              wheel={{ disabled: true }}
+              pinch={{ step: 5 }}
+              doubleClick={{ mode: "toggle", step: 2.2 }}
+              onTransformed={(_ref, state) => {
+                setIsZoomed(state.scale > 1.01);
+              }}
+            >
+              {({ resetTransform, instance }) => {
+                const scale = instance?.transformState?.scale ?? 1;
+
+                return (
+                  <>
+                    <TransformComponent
+                      wrapperClass="!h-[520px] !w-full"
+                      contentClass="!h-[520px] !w-full"
+                      wrapperStyle={{
+                        touchAction:
+                          isCoarsePointer && !isZoomed ? "pan-y" : "none",
+                      }}
+                    >
+                      {gallery[selectedImageIndex] ? (
+                        <div className="relative h-[520px] w-full">
+                          <Image
+                            src={gallery[selectedImageIndex]}
+                            alt={product.name}
+                            fill
+                            className="object-cover"
+                            priority
+                          />
+                        </div>
+                      ) : null}
+                    </TransformComponent>
+
+                    {scale > 1.01 ? (
+                      <button
+                        type="button"
+                        onClick={() => resetTransform()}
+                        className="absolute right-2 top-2 rounded-md bg-white/90 px-2 py-1 text-xs font-medium text-[#3f3731]"
+                      >
+                        Reset
+                      </button>
+                    ) : null}
+
+                    {gallery.length > 1 ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={goToPreviousImage}
+                          aria-label="Previous image"
+                          className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-xl text-white transition hover:bg-black/60"
+                        >
+                          &#8249;
+                        </button>
+                        <button
+                          type="button"
+                          onClick={goToNextImage}
+                          aria-label="Next image"
+                          className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-xl text-white transition hover:bg-black/60"
+                        >
+                          &#8250;
+                        </button>
+                      </>
+                    ) : null}
+                  </>
+                );
+              }}
+            </TransformWrapper>
           </div>
-          <div className="grid grid-cols-4 gap-3">
+
+          {gallery.length > 1 ? (
+            <div className="flex items-center justify-center gap-2">
+              {gallery.map((_, idx) => {
+                const isActive = idx === selectedImageIndex;
+                return (
+                  <button
+                    key={`dot-${product.id}-${idx}`}
+                    type="button"
+                    onClick={() => setSelectedImageIndex(idx)}
+                    aria-label={`Go to image ${idx + 1}`}
+                    className={`h-2.5 rounded-full transition-all ${isActive ? "w-6 bg-[#6A1F2B]" : "w-2.5 bg-[#cdbdab] hover:bg-[#b79f89]"}`}
+                  />
+                );
+              })}
+            </div>
+          ) : null}
+
+          <div className="hidden grid-cols-4 gap-3 md:grid">
             {gallery.map((image, idx) => (
               <button
                 key={`${product.id}-${selectedColor?.id ?? "default"}-${idx}`}

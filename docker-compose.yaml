@@ -22,7 +22,7 @@ services:
   api:
     build:
       context: ./apps/api
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.local
     container_name: seere_yaana_api
     restart: unless-stopped
     depends_on:
@@ -35,22 +35,25 @@ services:
       PORT: 4000
     ports:
       - "4000:4000"
+    volumes:
+      - ./apps/api:/app
+      - api_node_modules:/app/node_modules
+    command: >
+      sh -c '
+        if [ ! -d node_modules ] || [ -z "$(ls -A node_modules 2>/dev/null)" ]; then
+          npm install;
+        fi;
+        if [ ! -f node_modules/.prisma/client/default.js ]; then
+          npm run prisma:generate;
+        fi;
+        npx prisma db push;
+        npm run dev
+      '
 
   web:
     build:
       context: ./apps/web
-      dockerfile: Dockerfile
-      args:
-        AUTH_URL: ${AUTH_URL}
-        AUTH_SECRET: ${AUTH_SECRET}
-        API_INTERNAL_URL: ${API_INTERNAL_URL}
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
-        GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-        GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-        FACEBOOK_CLIENT_ID: ${FACEBOOK_CLIENT_ID}
-        FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET}
-        AUTH_APPLE_ID: ${AUTH_APPLE_ID}
-        AUTH_APPLE_SECRET: ${AUTH_APPLE_SECRET}
+      dockerfile: Dockerfile.local
     container_name: seere_yaana_web
     restart: unless-stopped
     depends_on:
@@ -62,8 +65,28 @@ services:
       API_INTERNAL_URL: http://api:4000
       NEXT_PUBLIC_RAZORPAY_KEY_ID: ${NEXT_PUBLIC_RAZORPAY_KEY_ID}
       NEXT_PUBLIC_BRAND_LOGO: ${NEXT_PUBLIC_BRAND_LOGO}
+      AUTH_URL: ${AUTH_URL}
+      AUTH_SECRET: ${AUTH_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      FACEBOOK_CLIENT_ID: ${FACEBOOK_CLIENT_ID}
+      FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET}
+      AUTH_APPLE_ID: ${AUTH_APPLE_ID}
+      AUTH_APPLE_SECRET: ${AUTH_APPLE_SECRET}
     ports:
       - "3445:3000"
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+      - web_next:/app/.next
+    command: >
+      sh -c '
+        npm install;
+        npm run dev -- -H 0.0.0.0 -p 3000
+      '
 
 volumes:
   postgres_data:
+  api_node_modules:
+  web_node_modules:
+  web_next:
