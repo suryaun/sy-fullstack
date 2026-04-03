@@ -21,7 +21,7 @@ Edit `CONTACT` values in `script.js`:
 1. Push this repo to GitHub.
 2. In repository settings, open **Pages**.
 3. Set source to **Deploy from branch**.
-4. Choose branch `main` and folder `/site`.
+4. Choose branch `main` and folder `/docs`.
 5. Save and wait for deployment.
 
 ## GoDaddy DNS
