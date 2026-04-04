@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Seere Yaana - Modern heirlooms, timeless drapes. Shop launching soon."
+    />
+    <title>Seere Yaana Shop | Coming Soon</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&amp;family=Outfit:wght@300;400;500;600&amp;display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #f8f3eb;
+        --bg-soft: #f2e7da;
+        --text: #20150f;
+        --text-soft: #5a4337;
+        --accent: #8d1f2d;
+        --gold: #be9658;
+        --shadow: 0 20px 50px rgba(32, 21, 15, 0.15);
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Outfit", sans-serif;
+        background-color: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      .container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 2rem;
+      }
+
+      .content {
+        text-align: center;
+        max-width: 600px;
+      }
+
+      .logo {
+        margin-bottom: 3rem;
+      }
+
+      .logo img {
+        width: 120px;
+        height: 120px;
+        object-fit: contain;
+      }
+
+      h1 {
+        font-family: "Cormorant Garamond", serif;
+        font-size: 3.5rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+        color: var(--accent);
+        letter-spacing: 1px;
+      }
+
+      .subtitle {
+        font-size: 1.5rem;
+        color: var(--text-soft);
+        margin-bottom: 2rem;
+        font-family: "Cormorant Garamond", serif;
+        font-weight: 400;
+      }
+
+      .description {
+        font-size: 1.1rem;
+        color: var(--text-soft);
+        margin-bottom: 3rem;
+        line-height: 1.6;
+      }
+
+      .cta-buttons {
+        display: flex;
+        gap: 1rem;
+        justify-content: center;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+      }
+
+      .cta-button {
+        padding: 1rem 2rem;
+        background-color: var(--accent);
+        color: var(--bg);
+        border: none;
+        font-size: 1rem;
+        font-family: "Outfit", sans-serif;
+        font-weight: 600;
+        cursor: pointer;
+        border-radius: 4px;
+        text-decoration: none;
+        display: inline-block;
+        transition: background-color 0.3s ease;
+      }
+
+      .cta-button:hover {
+        background-color: var(--text);
+      }
+
+      .cta-button.secondary {
+        background-color: transparent;
+        border: 2px solid var(--accent);
+        color: var(--accent);
+      }
+
+      .cta-button.secondary:hover {
+        background-color: var(--accent);
+        color: var(--bg);
+      }
+
+      .divider {
+        width: 60px;
+        height: 2px;
+        background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        margin: 2rem auto;
+      }
+
+      .footer-links {
+        display: flex;
+        gap: 2rem;
+        justify-content: center;
+        margin-top: 2rem;
+      }
+
+      .footer-links a {
+        color: var(--text-soft);
+        text-decoration: none;
+        font-size: 0.95rem;
+        transition: color 0.3s ease;
+      }
+
+      .footer-links a:hover {
+        color: var(--accent);
+      }
+
+      @media (max-width: 600px) {
+        h1 {
+          font-size: 2.5rem;
+        }
+
+        .subtitle {
+          font-size: 1.25rem;
+        }
+
+        .cta-buttons {
+          flex-direction: column;
+        }
+
+        .footer-links {
+          flex-direction: column;
+          gap: 1rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="content">
+        <div class="logo">
+          <img src="../assets/hero-ilkal.webp" alt="Seere Yaana" />
+        </div>
+
+        <h1>Coming Soon</h1>
+        <p class="subtitle">Seere Yaana Shop</p>
+
+        <p class="description">
+          Our ecommerce platform is launching soon. Until then, we're currently operating through Instagram and WhatsApp for orders.
+        </p>
+
+        <div class="cta-buttons">
+          <a href="https://www.instagram.com/seere_yaana" target="_blank" rel="noopener noreferrer" class="cta-button">
+            Order on Instagram
+          </a>
+          <a href="https://wa.me/919187668643" target="_blank" rel="noopener noreferrer" class="cta-button secondary">
+            Message on WhatsApp
+          </a>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="footer-links">
+          <a href="https://www.seereyaana.com">Back to Main</a>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
