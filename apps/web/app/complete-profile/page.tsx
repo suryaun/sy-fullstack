@@ -108,7 +108,7 @@ function CompleteProfileContent() {
             placeholder="Full name"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="w-full rounded-xl border border-[#d7c9b7] bg-white px-4 py-3 text-sm"
+            className="w-full rounded border border-[#e4d9d0] bg-white px-4 py-3 text-sm font-light"
             required
           />
           <input
@@ -116,7 +116,7 @@ function CompleteProfileContent() {
             placeholder="Email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            className="w-full rounded-xl border border-[#d7c9b7] bg-white px-4 py-3 text-sm"
+            className="w-full rounded border border-[#e4d9d0] bg-white px-4 py-3 text-sm font-light"
             required
           />
           <button

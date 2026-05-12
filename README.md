@@ -79,6 +79,24 @@ Minimalist-luxury boutique commerce stack with:
    - `IMAGEKIT_URL_ENDPOINT`
    - Optional: `IMAGEKIT_FOLDER`, `IMAGE_UPLOAD_WEBP_QUALITY`, `IMAGE_UPLOAD_MAX_BYTES` (default: 15728640 = 15 MB)
 
+### Secure Admin/Public API Separation
+
+- Admin UI now uses server-side proxy routes under `web` (`/api/admin/proxy/*`) instead of calling admin API directly from the browser.
+- Admin token cookie is `httpOnly`, `SameSite=Strict`, and scoped to `/api/admin` so client-side JavaScript cannot read it.
+- Normal users cannot access admin proxy routes because each request verifies:
+   - logged-in mobile session
+   - mobile number in `ADMIN_MOBILE_NUMBERS`
+   - valid admin session cookie
+- Optional hardening: set `ADMIN_PROXY_SHARED_SECRET` (same value in `web` and `api`).
+   - When set, admin API rejects requests that do not include this secret header.
+   - This effectively forces admin traffic to pass through your trusted web proxy.
+
+Recommended deployment model:
+- Host public API and admin API on different internal services.
+- Expose only public API to the internet.
+- Keep admin API private (VPC/internal network) and reachable only from web server.
+- Configure `ADMIN_API_INTERNAL_URL` in web to point to internal admin API endpoint.
+
 ### Admin Access Using Mobile Login
 
 Admin access is now tied to mobile OTP login.

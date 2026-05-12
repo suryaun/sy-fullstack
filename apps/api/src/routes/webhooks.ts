@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { Router } from "express";
-import { prisma } from "../lib/prisma.js";
+import { markOrderAsPaidByRazorpayOrderId } from "../lib/orderPayment.js";
 
 const router = Router();
 
@@ -38,12 +38,9 @@ router.post("/razorpay", async (req, res) => {
     const razorpayPaymentId = event.payload?.payment?.entity?.id;
 
     if (razorpayOrderId) {
-      await prisma.order.updateMany({
-        where: { razorpayOrderId },
-        data: {
-          status: "PAID",
-          razorpayPaymentId: razorpayPaymentId ?? undefined
-        }
+      await markOrderAsPaidByRazorpayOrderId({
+        razorpayOrderId,
+        razorpayPaymentId
       });
     }
   }

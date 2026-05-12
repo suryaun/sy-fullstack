@@ -6,20 +6,22 @@ import PayNowButton from "@/components/PayNowButton";
 
 type Props = {
   productId: string;
+  productColorId: string;
   priceInPaise: number;
   inStock: boolean;
 };
 
 export default function ProductActions({
   productId,
+  productColorId,
   priceInPaise,
   inStock,
 }: Props) {
   const { toggleWishlist, isWishlisted, addToCart } = useStore();
 
   const checkoutItems = useMemo(
-    () => [{ productId, quantity: 1 }],
-    [productId],
+    () => [{ productId, productColorId, quantity: 1 }],
+    [productColorId, productId],
   );
 
   return (
@@ -27,17 +29,19 @@ export default function ProductActions({
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => toggleWishlist(productId)}
-          className="rounded-full border border-[#d7c9b7] px-5 py-3 text-xs font-semibold uppercase tracking-[0.15em] text-[#5b5149]"
+          onClick={() => toggleWishlist(productId, productColorId)}
+          className="rounded-sm border border-[#e4d9d0] px-5 py-3 text-[11px] uppercase tracking-[0.18em] text-[#5c4e44] transition hover:border-[#c5b9ae] hover:bg-[#faf8f5]"
         >
-          {isWishlisted(productId) ? "Wishlisted" : "Add to Wishlist"}
+          {isWishlisted(productId, productColorId)
+            ? "Wishlisted"
+            : "Add to Wishlist"}
         </button>
 
         <button
           type="button"
-          onClick={() => addToCart(productId, 1)}
+          onClick={() => addToCart(productId, productColorId, 1)}
           disabled={!inStock}
-          className="rounded-full border border-[#d7c9b7] px-5 py-3 text-xs font-semibold uppercase tracking-[0.15em] text-[#5b5149] disabled:opacity-50"
+          className="rounded-sm border border-[#e4d9d0] px-5 py-3 text-[11px] uppercase tracking-[0.18em] text-[#5c4e44] transition hover:border-[#c5b9ae] hover:bg-[#faf8f5] disabled:opacity-40"
         >
           Add to Bag
         </button>

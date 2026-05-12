@@ -4,14 +4,34 @@ import { prisma } from "../lib/prisma.js";
 
 const router = Router();
 
-function asSingle(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-router.get("/", async (_req, res) => {
-  const products = await prisma.product.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
+const productListSelect = Prisma.validator<Prisma.ProductSelect>()({
+  id: true,
+  name: true,
+  description: true,
+  fabric: true,
+  craft: true,
+  lengthInMeters: true,
+  blouseIncluded: true,
+  priceInPaise: true,
+  stockStatus: true,
+  imageUrl: true,
+  images: {
+    orderBy: { sortOrder: "asc" },
+    select: {
+      imageUrl: true,
+      sortOrder: true
+    }
+  },
+  colors: {
+    where: { isActive: true },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      colorCode: true,
+      isDefault: true,
+      stockQuantity: true,
+      priceInPaise: true,
       images: {
         orderBy: { sortOrder: "asc" },
         select: {
@@ -20,9 +40,158 @@ router.get("/", async (_req, res) => {
         }
       }
     }
+  },
+  productCategories: {
+    select: {
+      category: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          parentId: true,
+          sortOrder: true
+        }
+      }
+    }
+  }
+});
+
+const productDetailSelect = Prisma.validator<Prisma.ProductSelect>()({
+  id: true,
+  name: true,
+  description: true,
+  fabric: true,
+  craft: true,
+  lengthInMeters: true,
+  blouseIncluded: true,
+  priceInPaise: true,
+  stockStatus: true,
+  imageUrl: true,
+  imagePublicId: true,
+  createdAt: true,
+  updatedAt: true,
+  images: {
+    orderBy: { sortOrder: "asc" }
+  },
+  colors: {
+    where: { isActive: true },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    include: {
+      images: { orderBy: { sortOrder: "asc" } }
+    }
+  },
+  productCategories: {
+    select: {
+      category: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          parentId: true,
+          sortOrder: true
+        }
+      }
+    }
+  }
+});
+
+type ProductListRow = Prisma.ProductGetPayload<{ select: typeof productListSelect }>;
+type ProductDetailRow = Prisma.ProductGetPayload<{ select: typeof productDetailSelect }>;
+
+type CategoryListItem = {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  sortOrder: number;
+};
+
+type CategoryTreeNode = CategoryListItem & {
+  children: CategoryTreeNode[];
+};
+
+function mapCategoriesForResponse(productCategories: Array<{ category: { id: string; name: string; slug: string; parentId: string | null; sortOrder: number } }>) {
+  return productCategories
+    .map((item) => item.category)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+}
+
+function mapProductListItem(product: ProductListRow) {
+  const { productCategories, ...rest } = product;
+  return {
+    ...rest,
+    categories: mapCategoriesForResponse(productCategories)
+  };
+}
+
+function mapProductDetailItem(product: ProductDetailRow) {
+  const { productCategories, ...rest } = product;
+  return {
+    ...rest,
+    categories: mapCategoriesForResponse(productCategories)
+  };
+}
+
+function asSingle(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function buildCategoryTree(categories: CategoryListItem[]) {
+  const nodes = new Map<string, CategoryTreeNode>();
+  for (const category of categories) {
+    nodes.set(category.id, { ...category, children: [] });
+  }
+
+  const roots: CategoryTreeNode[] = [];
+  for (const node of nodes.values()) {
+    if (!node.parentId) {
+      roots.push(node);
+      continue;
+    }
+
+    const parent = nodes.get(node.parentId);
+    if (parent) {
+      parent.children.push(node);
+      continue;
+    }
+
+    roots.push(node);
+  }
+
+  const sortNodes = (items: CategoryTreeNode[]) => {
+    items.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+    for (const item of items) {
+      sortNodes(item.children);
+    }
+  };
+
+  sortNodes(roots);
+  return roots;
+}
+
+router.get("/", async (_req, res) => {
+  const products = await prisma.product.findMany({
+    where: { hidden: false },
+    orderBy: { createdAt: "desc" },
+    select: productListSelect
   });
 
-  return res.json(products);
+  return res.json(products.map(mapProductListItem));
+});
+
+router.get("/categories", async (_req, res) => {
+  const categories = await prisma.category.findMany({
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      parentId: true,
+      sortOrder: true
+    }
+  });
+
+  return res.json(buildCategoryTree(categories));
 });
 
 router.get("/:id", async (req, res) => {
@@ -33,28 +202,18 @@ router.get("/:id", async (req, res) => {
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    include: {
-      images: {
-        orderBy: { sortOrder: "asc" }
-      },
-      colors: {
-        where: { isActive: true },
-        orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
-        include: {
-          images: { orderBy: { sortOrder: "asc" } }
-        }
-      }
-    }
+    select: productDetailSelect
   });
 
-  if (!product) {
+  if (!product || product.hidden) {
     return res.status(404).json({ message: "Product not found" });
   }
 
-  const defaultColor = product.colors.find((color) => color.isDefault) ?? product.colors[0] ?? null;
+  const mappedProduct = mapProductDetailItem(product);
+  const defaultColor = mappedProduct.colors.find((color) => color.isDefault) ?? mappedProduct.colors[0] ?? null;
 
   return res.json({
-    ...product,
+    ...mappedProduct,
     defaultColorId: defaultColor?.id ?? null
   });
 });

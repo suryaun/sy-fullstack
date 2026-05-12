@@ -1,6 +1,6 @@
+import Image from "next/image";
 import BoutiqueGallery from "@/components/BoutiqueGallery";
-import { catalogProducts } from "@/lib/catalog";
-import type { CatalogProduct } from "@/lib/types";
+import type { CatalogCategoryNode, CatalogProduct } from "@/lib/types";
 
 type ApiHomeProduct = {
   id: string;
@@ -14,12 +14,37 @@ type ApiHomeProduct = {
   stockStatus: "IN_STOCK" | "SOLD_OUT";
   imageUrl: string;
   images?: Array<{ imageUrl: string; sortOrder?: number }>;
+  colors?: Array<{
+    id: string;
+    name: string;
+    colorCode?: string | null;
+    isDefault: boolean;
+    stockQuantity: number;
+    priceInPaise?: number | null;
+    images?: Array<{ imageUrl: string; sortOrder?: number }>;
+  }>;
+  categories?: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    parentId: string | null;
+    sortOrder: number;
+  }>;
 };
 
 const INTERNAL_API_URL =
   process.env.API_INTERNAL_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
   "http://localhost:4000";
+
+type ApiHomeCategoryNode = {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  sortOrder: number;
+  children: ApiHomeCategoryNode[];
+};
 
 async function getHomepageProducts(): Promise<CatalogProduct[]> {
   try {
@@ -28,12 +53,12 @@ async function getHomepageProducts(): Promise<CatalogProduct[]> {
     });
 
     if (!response.ok) {
-      return catalogProducts;
+      return [];
     }
 
     const apiProducts = (await response.json()) as ApiHomeProduct[];
     if (apiProducts.length === 0) {
-      return catalogProducts;
+      return [];
     }
 
     const mappedApiProducts = apiProducts.map((product) => {
@@ -44,6 +69,30 @@ async function getHomepageProducts(): Promise<CatalogProduct[]> {
               .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
               .map((image) => image.imageUrl)
           : [product.imageUrl];
+
+      const availableColors =
+        product.colors && product.colors.length > 0
+          ? product.colors.map((color) => ({
+              id: color.id,
+              name: color.name,
+              colorCode: color.colorCode,
+              isDefault: color.isDefault,
+              stockQuantity: color.stockQuantity,
+              priceInPaise: color.priceInPaise,
+              images: (color.images ?? []).map((image) => image.imageUrl),
+            }))
+          : [
+              {
+                name: "Signature shade",
+                colorCode: null,
+                isDefault: true,
+              },
+            ];
+
+      const primaryColorTone =
+        availableColors.find((color) => color.isDefault)?.name ??
+        availableColors[0]?.name ??
+        "Curated shade";
 
       return {
         id: product.id,
@@ -56,49 +105,93 @@ async function getHomepageProducts(): Promise<CatalogProduct[]> {
         lengthInMeters: product.lengthInMeters,
         weight: "-",
         work: "Curated handcrafted detailing",
-        colorTone: "Curated shade",
+        colorTone: primaryColorTone,
+        availableColors,
         care: "Dry clean only",
         occasion: "Festive and occasion wear",
         blouseIncluded: product.blouseIncluded,
         priceInPaise: product.priceInPaise,
         stockStatus: product.stockStatus,
+        categories: product.categories ?? [],
       };
     });
 
-    // Keep catalog coverage while prioritizing live API records for matching IDs.
-    const mergedById = new Map<string, CatalogProduct>();
-    for (const product of catalogProducts) {
-      mergedById.set(product.id, product);
-    }
-    for (const product of mappedApiProducts) {
-      mergedById.set(product.id, product);
+    return mappedApiProducts;
+  } catch {
+    return [];
+  }
+}
+
+async function getHomepageCategories(): Promise<CatalogCategoryNode[]> {
+  try {
+    const response = await fetch(`${INTERNAL_API_URL}/api/products/categories`, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return [];
     }
 
-    return Array.from(mergedById.values());
+    const categories = (await response.json()) as ApiHomeCategoryNode[];
+    return categories;
   } catch {
-    return catalogProducts;
+    return [];
   }
 }
 
 export default async function Home() {
-  const products = await getHomepageProducts();
+  const [products, categories] = await Promise.all([
+    getHomepageProducts(),
+    getHomepageCategories(),
+  ]);
 
   return (
     <main>
-      <header className="mx-auto max-w-6xl px-6 pb-6 pt-14 text-center">
-        <p className="mb-3 text-xs uppercase tracking-[0.35em] text-[#6A1F2B]">
-          Seere Yaana
-        </p>
-        <h1 className="font-serif text-5xl leading-tight text-ink sm:text-6xl">
-          Modern Heirlooms in Every Drape
-        </h1>
-        <p className="mx-auto mt-5 max-w-2xl text-sm text-[#5b5149] sm:text-base">
-          Curated handcrafted drapes with a minimalist luxury edit designed for
-          intimate weddings, festive soirees, and statement evenings.
-        </p>
+      <header className="hero-lockup">
+        {/* Logo seal */}
+        <div className="hero-logo-shell">
+          <div className="hero-logo-frame">
+            <span className="hero-logo-mark">
+              <Image
+                src="/seere-yaana-logo.png"
+                alt="Seere Yaana"
+                fill
+                className="object-cover"
+                sizes="(max-width: 640px) 44vw, 300px"
+                priority
+              />
+            </span>
+          </div>
+        </div>
+
+        <div className="hero-text">
+          <h1 className="font-serif text-5xl italic leading-[1.08] text-ink sm:text-6xl lg:text-7xl">
+            Designed Like Couture,<br className="hidden sm:block" /> Worn Like Air.
+          </h1>
+          <p className="mt-7 max-w-xl text-sm leading-relaxed text-[#5c4a42] sm:text-base">
+            Curated handcrafted drapes with a minimalist luxury edit — designed for
+            intimate weddings, festive soirees, and statement evenings.
+          </p>
+        </div>
       </header>
 
-      <BoutiqueGallery products={products} />
+      <BoutiqueGallery products={products} categories={categories} />
+
+      {/* Footer seal */}
+      <footer className="flex flex-col items-center gap-4 border-t border-[#e4d9d0] py-12">
+        <span className="relative h-12 w-12 overflow-hidden rounded-full opacity-70 ring-1 ring-[#e4d9d0]">
+          <Image
+            src="/seere-yaana-logo.png"
+            alt="Seere Yaana"
+            fill
+            className="object-cover"
+            sizes="48px"
+          />
+        </span>
+        <p className="text-xs uppercase tracking-[0.3em] text-[#7a6050]">
+          Seere Yaana · Handcrafted Luxury
+        </p>
+      </footer>
     </main>
   );
 }

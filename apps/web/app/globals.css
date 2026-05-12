@@ -1,29 +1,45 @@
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Manrope:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500;1,600&family=Jost:wght@300;400;500&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --bg: #f8f5f1;
-  --bg-soft: #efe8df;
+  --bg: #faf8f5;
+  --bg-soft: #f5f1eb;
+  --surface: #ffffff;
+  --surface-elevated: #ffffff;
   --text: #1f1a17;
-  --wine: #6a1f2b;
+  --muted: #6b5548;
+  --accent: #6a1f2b;
+  --accent-hover: #511727;
   --gold: #c7a56a;
+  --border: #e4d9d0;
+  --border-soft: #f0e9e1;
 }
 
 body {
-  background:
-    radial-gradient(circle at 85% 15%, rgba(199, 165, 106, 0.2), transparent 35%),
-    radial-gradient(circle at 10% 80%, rgba(106, 31, 43, 0.12), transparent 45%),
-    var(--bg);
+  font-family: "Jost", system-ui, sans-serif;
+  background: var(--bg);
   color: var(--text);
+  font-weight: 400;
+  font-size: 1.0625rem; /* 17px — Tailwind text-base in our extended scale */
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: "Cormorant Garamond", "Georgia", serif;
+  letter-spacing: -0.01em;
+  font-weight: 400;
+  line-height: 1.1;
 }
 
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(14px);
+    transform: translateY(18px);
   }
   to {
     opacity: 1;
@@ -32,5 +48,144 @@ body {
 }
 
 .animate-rise {
-  animation: rise 700ms ease-out both;
+  animation: rise 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.hero-lockup {
+  display: flex;
+  align-items: center;
+  gap: clamp(2rem, 5vw, 4rem);
+  max-width: 64rem;
+  margin: 0 auto;
+  padding: clamp(3rem, 8vw, 5rem) 1.5rem clamp(2rem, 5vw, 3rem);
+}
+
+.hero-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.hero-logo-shell {
+  flex-shrink: 0;
+}
+
+@keyframes logo-shine {
+  0%, 65%, 100% {
+    transform: translateX(-200%) skewX(-18deg);
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  45% {
+    transform: translateX(300%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+@keyframes logo-frame-glow {
+  0%, 100% {
+    border-color: rgba(199, 165, 106, 0.3);
+    box-shadow:
+      0 18px 44px rgba(31, 26, 23, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  }
+  50% {
+    border-color: rgba(199, 165, 106, 0.65);
+    box-shadow:
+      0 18px 44px rgba(31, 26, 23, 0.1),
+      0 0 28px rgba(199, 165, 106, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  }
+}
+
+.hero-logo-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border: 1px solid rgba(199, 165, 106, 0.3);
+  border-radius: 999px;
+  padding: clamp(0.6rem, 1.5vw, 0.9rem);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(245, 241, 235, 0.9)),
+    radial-gradient(circle at top, rgba(199, 165, 106, 0.22), transparent 58%);
+  box-shadow:
+    0 18px 44px rgba(31, 26, 23, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  animation: logo-frame-glow 5s ease-in-out infinite;
+}
+
+.hero-logo-mark {
+  position: relative;
+  display: block;
+  width: clamp(11rem, 22vw, 18rem);
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  box-shadow:
+    0 14px 34px rgba(31, 26, 23, 0.14),
+    0 0 0 1px rgba(228, 217, 208, 0.9);
+}
+
+.hero-logo-mark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.06) 34%,
+    rgba(255, 255, 255, 0.52) 50%,
+    rgba(255, 255, 255, 0.06) 66%,
+    transparent 80%
+  );
+  transform: translateX(-200%) skewX(-18deg);
+  animation: logo-shine 5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .hero-lockup {
+    flex-direction: column;
+    text-align: center;
+    padding: 2.5rem 1.25rem 2rem;
+  }
+
+  .hero-logo-mark {
+    width: clamp(9rem, 44vw, 11rem);
+  }
+}
+
+.apple-tile {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 2px 20px rgba(31, 26, 23, 0.05);
+}
+
+.apple-button-primary {
+  background: var(--text);
+  color: #faf8f5;
+  transition: background-color 220ms ease, transform 220ms ease;
+  letter-spacing: 0.1em;
+}
+
+.apple-button-primary:hover {
+  background: var(--accent);
+  transform: translateY(-1px);
+}
+
+.apple-button-secondary {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  transition: border-color 220ms ease, background-color 220ms ease, transform 220ms ease;
+  letter-spacing: 0.1em;
+}
+
+.apple-button-secondary:hover {
+  border-color: #c5b9ae;
+  background: var(--bg-soft);
+  transform: translateY(-1px);
 }

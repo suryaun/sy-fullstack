@@ -57,7 +57,7 @@ export default function UserAuthChip() {
 
   if (status === "loading") {
     return (
-      <span className="text-xs uppercase tracking-[0.2em] text-[#6b625b]">
+      <span className="text-xs uppercase tracking-[0.2em] text-[#4e4038]">
         Checking session...
       </span>
     );
@@ -67,7 +67,7 @@ export default function UserAuthChip() {
     return (
       <a
         href={`/login?callbackUrl=${encodeURIComponent(pathname || "/")}`}
-        className="rounded-full border border-[#d7c9b7] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink transition hover:border-wine hover:text-wine"
+        className="rounded-sm border border-[#e4d9d0] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-ink transition hover:border-[#c5b9ae] hover:bg-[#f5f1eb]"
       >
         Sign In
       </a>
@@ -81,23 +81,30 @@ export default function UserAuthChip() {
         onClick={() => setIsMenuOpen((previous) => !previous)}
         aria-haspopup="menu"
         aria-expanded={isMenuOpen}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-[#d7c9b7] bg-white text-xs font-semibold uppercase tracking-[0.08em] text-[#5e554d] transition hover:border-wine hover:text-wine"
+        className="flex h-8 w-8 items-center justify-center rounded border border-[#e4d9d0] bg-[#faf8f5] text-[11px] uppercase tracking-[0.08em] text-[#5c4e44] transition hover:border-[#c5b9ae] hover:bg-white"
       >
         {initials}
       </button>
 
       {isMenuOpen ? (
-        <div className="absolute right-0 top-full z-30 mt-2 w-56 rounded-xl border border-[#e2d6c8] bg-[#fffdf9] p-3 shadow-lg">
+        <div className="absolute right-0 top-full z-30 mt-2 w-52 rounded border border-[#e4d9d0] bg-white p-4 shadow-[0_8px_32px_rgba(31,26,23,0.09)]">
           <p className="truncate text-sm font-semibold text-[#3f3731]">
             {displayName}
           </p>
-          <p className="mt-1 truncate text-xs text-[#7b726a]">
+          <p className="mt-1 truncate text-xs text-[#5c4a42]">
             {session.user.email ?? "Signed in"}
           </p>
           <Link
-            href="/complete-profile"
+            href="/orders"
             onClick={() => setIsMenuOpen(false)}
-            className="mt-3 block w-full rounded-lg border border-[#d7c9b7] px-3 py-2 text-center text-xs font-semibold uppercase tracking-[0.12em] text-[#5e554d] transition hover:border-wine hover:text-wine"
+            className="mt-3 block w-full rounded-sm border border-[#e4d9d0] px-3 py-2 text-center text-xs uppercase tracking-[0.16em] text-[#5c4e44] transition hover:border-[#c5b9ae] hover:bg-[#faf8f5]"
+          >
+            Orders
+          </Link>
+          <Link
+            href="/account"
+            onClick={() => setIsMenuOpen(false)}
+            className="mt-1.5 block w-full rounded-sm border border-[#e4d9d0] px-3 py-2 text-center text-xs uppercase tracking-[0.16em] text-[#5c4e44] transition hover:border-[#c5b9ae] hover:bg-[#faf8f5]"
           >
             My Account
           </Link>
@@ -108,7 +115,7 @@ export default function UserAuthChip() {
               await signOut({ redirect: false });
               window.location.assign("/");
             }}
-            className="mt-2 w-full rounded-lg bg-wine px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-ivory"
+            className="mt-1.5 w-full rounded-sm bg-ink px-3 py-2 text-xs uppercase tracking-[0.16em] text-[#faf8f5] transition hover:bg-wine"
           >
             Sign Out
           </button>

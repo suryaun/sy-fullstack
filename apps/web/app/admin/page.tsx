@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { getPublicApiUrl } from "@/lib/publicApiUrl";
+import ColorPickerInput from "@/components/ColorPickerInput";
 
 type StockState = "IN_STOCK" | "SOLD_OUT";
 
@@ -15,9 +15,99 @@ type AdminImage = {
 type AdminColor = {
   id: string;
   name: string;
+  sku?: string;
+  borderColorName?: string;
   stockQuantity: number;
   isDefault: boolean;
   images?: AdminImage[];
+};
+
+type AdminPiece = {
+  id: string;
+  serial: string;
+  pieceNumber: number;
+  status: "AVAILABLE" | "SOLD" | "RETURNED" | "REMOVED";
+  allocatedOrderItemId: string | null;
+};
+
+type AdminOrderItem = {
+  id: string;
+  quantity: number;
+  priceAtTime: number;
+  hsnCode: string | null;
+  gstRatePercent: number;
+  taxableAmountInPaise: number;
+  cgstInPaise: number;
+  sgstInPaise: number;
+  igstInPaise: number;
+  product: { id: string; name: string };
+  productColor: { id: string; name: string; sku: string | null } | null;
+};
+
+type AdminOrder = {
+  id: string;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  status: "PENDING" | "PAID" | "FAILED" | "CANCELLED";
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  deliveryState: string | null;
+  amountInPaise: number;
+  taxableAmountInPaise: number;
+  cgstInPaise: number;
+  sgstInPaise: number;
+  igstInPaise: number;
+  createdAt: string;
+  items: AdminOrderItem[];
+};
+
+type GstB2csRow = {
+  placeOfSupply: string;
+  gstRatePercent: number;
+  taxableAmountInPaise: number;
+  cgstInPaise: number;
+  sgstInPaise: number;
+  igstInPaise: number;
+  invoiceCount: number;
+};
+
+type AdminGstReport = {
+  month: string;
+  invoiceCount: number;
+  b2cs: GstB2csRow[];
+  totals: {
+    taxableAmountInPaise: number;
+    cgstInPaise: number;
+    sgstInPaise: number;
+    igstInPaise: number;
+    grandTotalInPaise: number;
+  };
+  invoices: AdminOrder[];
+};
+
+type AdminProductCategory = {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  sortOrder: number;
+};
+
+type AdminCategoryNode = {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  sortOrder: number;
+  children: AdminCategoryNode[];
+};
+
+type FlatCategoryOption = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  depth: number;
 };
 
 type AdminProduct = {
@@ -26,6 +116,7 @@ type AdminProduct = {
   stockStatus: StockState;
   images?: AdminImage[];
   colors: AdminColor[];
+  categories: AdminProductCategory[];
 };
 
 type ProductForm = {
@@ -51,33 +142,162 @@ type ProductForm = {
     | "TUSSAR";
   lengthInMeters: string;
   blouseIncluded: boolean;
+  hasHandloomMark: boolean;
   priceInInr: string;
+  categoryIds: string[];
 };
 
 type ColorForm = {
   productId: string;
   name: string;
   colorCode: string;
+  borderColorName: string;
+  borderColorCode: string;
   stockQuantity: string;
   isDefault: boolean;
 };
 
+type AdminTab = "overview" | "add-product" | "add-color" | "inventory" | "categories" | "pieces" | "orders";
+
+function flattenCategoryTree(
+  nodes: AdminCategoryNode[],
+  depth = 0,
+): FlatCategoryOption[] {
+  return nodes.flatMap((node) => [
+    { id: node.id, name: node.name, parentId: node.parentId, depth },
+    ...flattenCategoryTree(node.children, depth + 1),
+  ]);
+}
+
+function buildCategoryHierarchyMaps(flatCategories: FlatCategoryOption[]) {
+  const parentById = new Map<string, string | null>();
+  const childrenById = new Map<string, string[]>();
+
+  for (const category of flatCategories) {
+    parentById.set(category.id, category.parentId);
+    if (category.parentId) {
+      const children = childrenById.get(category.parentId) ?? [];
+      children.push(category.id);
+      childrenById.set(category.parentId, children);
+    }
+  }
+
+  const ancestorIdsById = new Map<string, string[]>();
+  const descendantIdsById = new Map<string, string[]>();
+
+  const collectAncestors = (categoryId: string): string[] => {
+    const cached = ancestorIdsById.get(categoryId);
+    if (cached) {
+      return cached;
+    }
+
+    const ancestors: string[] = [];
+    let cursor = parentById.get(categoryId) ?? null;
+
+    while (cursor) {
+      ancestors.push(cursor);
+      cursor = parentById.get(cursor) ?? null;
+    }
+
+    ancestorIdsById.set(categoryId, ancestors);
+    return ancestors;
+  };
+
+  const collectDescendants = (categoryId: string): string[] => {
+    const cached = descendantIdsById.get(categoryId);
+    if (cached) {
+      return cached;
+    }
+
+    const descendants: string[] = [];
+    for (const childId of childrenById.get(categoryId) ?? []) {
+      descendants.push(childId);
+      descendants.push(...collectDescendants(childId));
+    }
+
+    descendantIdsById.set(categoryId, descendants);
+    return descendants;
+  };
+
+  for (const category of flatCategories) {
+    collectAncestors(category.id);
+    collectDescendants(category.id);
+  }
+
+  return {
+    ancestorIdsById,
+    descendantIdsById,
+  };
+}
+
+type CategoryTreeSelectorProps = {
+  nodes: AdminCategoryNode[];
+  selectedCategoryIds: string[];
+  onToggle: (categoryId: string, checked: boolean) => void;
+  disabled?: boolean;
+};
+
+function CategoryTreeSelector({
+  nodes,
+  selectedCategoryIds,
+  onToggle,
+  disabled = false,
+}: CategoryTreeSelectorProps) {
+  const selectedIdSet = new Set(selectedCategoryIds);
+
+  const renderNodes = (items: AdminCategoryNode[], level: number) => {
+    if (items.length === 0) {
+      return null;
+    }
+
+    return (
+      <div
+        className={
+          level === 0
+            ? "space-y-1"
+            : "mt-1 space-y-1 border-l border-[#eadfce] pl-3"
+        }
+      >
+        {items.map((node) => {
+          const selected = selectedIdSet.has(node.id);
+
+          return (
+            <div key={node.id}>
+              <label
+                className={`flex items-center gap-2 rounded-md px-2 py-1 text-xs transition ${
+                  selected
+                    ? "border border-[#e4c7cc] bg-[#fef2f4] text-[#6a1f2b]"
+                    : "border border-transparent bg-white text-[#5b5149]"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={disabled}
+                  onChange={(event) => onToggle(node.id, event.target.checked)}
+                />
+                <span className="font-medium">{node.name}</span>
+                {node.children.length > 0 ? (
+                  <span className="text-[10px] uppercase tracking-[0.12em] text-[#8a7a69]">
+                    Parent
+                  </span>
+                ) : null}
+              </label>
+              {renderNodes(node.children, level + 1)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return renderNodes(nodes, 0);
+}
+
 const ADMIN_UPLOAD_MAX_DIMENSION = 2200;
 const ADMIN_UPLOAD_TARGET_BYTES = 4 * 1024 * 1024;
 const ADMIN_UPLOAD_MIN_QUALITY = 0.62;
-
-function getAdminTokenFromCookie() {
-  if (typeof document === "undefined") {
-    return "";
-  }
-
-  const raw = document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith("admin_token="));
-
-  return raw ? decodeURIComponent(raw.split("=")[1] ?? "") : "";
-}
+const ADMIN_PROXY_BASE = "/api/admin/proxy";
 
 function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
   if (
@@ -181,11 +401,17 @@ async function optimizeImageForUpload(file: File) {
 export default function AdminPage() {
   const previewUrlCacheRef = useRef<Map<File, string>>(new Map());
   const [products, setProducts] = useState<AdminProduct[]>([]);
+  const [categories, setCategories] = useState<AdminCategoryNode[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingCategories, setLoadingCategories] = useState(true);
   const [stockUpdatingId, setStockUpdatingId] = useState<string | null>(null);
   const [defaultUpdatingId, setDefaultUpdatingId] = useState<string | null>(
     null,
   );
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [productCategorySavingId, setProductCategorySavingId] = useState<
+    string | null
+  >(null);
   const [appendProductLoadingId, setAppendProductLoadingId] = useState<
     string | null
   >(null);
@@ -216,15 +442,100 @@ export default function AdminPage() {
     craft: "BANARASI",
     lengthInMeters: "5.5",
     blouseIncluded: true,
+    hasHandloomMark: false,
     priceInInr: "",
+    categoryIds: [],
   });
   const [colorForm, setColorForm] = useState<ColorForm>({
     productId: "",
     name: "",
     colorCode: "",
+    borderColorName: "",
+    borderColorCode: "",
     stockQuantity: "0",
     isDefault: false,
   });
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [inventoryQuery, setInventoryQuery] = useState("");
+  const [inventoryFilter, setInventoryFilter] = useState<
+    "ALL" | "IN_STOCK" | "SOLD_OUT"
+  >("ALL");
+  const [categoryForm, setCategoryForm] = useState<{
+    name: string;
+    parentId: string;
+  }>({
+    name: "",
+    parentId: "",
+  });
+
+  // Pieces tab state
+  const [piecesProductId, setPiecesProductId] = useState("");
+  const [piecesColorId, setPiecesColorId] = useState("");
+  const [pieces, setPieces] = useState<AdminPiece[]>([]);
+  const [piecesSku, setPiecesSku] = useState<string | null>(null);
+  const [piecesLoading, setPiecesLoading] = useState(false);
+
+  // Orders / GST tab state
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [gstMonth, setGstMonth] = useState("");
+  const [gstReport, setGstReport] = useState<AdminGstReport | null>(null);
+  const [gstReportLoading, setGstReportLoading] = useState(false);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+
+  // Product management state
+  const [restockingColorId, setRestockingColorId] = useState<string | null>(null);
+  const [restockQuantity, setRestockQuantity] = useState("");
+  const [hideDeleteConfirmProductId, setHideDeleteConfirmProductId] = useState<string | null>(null);
+  const [hideDeleteAction, setHideDeleteAction] = useState<"hide" | "delete" | null>(null);
+
+  const flatCategories = useMemo(
+    () => flattenCategoryTree(categories),
+    [categories],
+  );
+
+  const categoryHierarchyMaps = useMemo(
+    () => buildCategoryHierarchyMaps(flatCategories),
+    [flatCategories],
+  );
+
+  const categoryPathById = useMemo(() => {
+    const byId = new Map(
+      flatCategories.map((category) => [category.id, category]),
+    );
+    const labelMemo = new Map<string, string>();
+
+    const buildPath = (id: string): string => {
+      const cached = labelMemo.get(id);
+      if (cached) {
+        return cached;
+      }
+
+      const category = byId.get(id);
+      if (!category) {
+        labelMemo.set(id, "");
+        return "";
+      }
+
+      const parentPath =
+        category.parentId && byId.has(category.parentId)
+          ? buildPath(category.parentId)
+          : "";
+      const path = parentPath
+        ? `${parentPath} / ${category.name}`
+        : category.name;
+
+      labelMemo.set(id, path);
+      return path;
+    };
+
+    const result = new Map<string, string>();
+    for (const category of flatCategories) {
+      result.set(category.id, buildPath(category.id));
+    }
+
+    return result;
+  }, [flatCategories]);
 
   const isSubmitDisabled = useMemo(() => {
     return (
@@ -237,6 +548,28 @@ export default function AdminPage() {
       Number(form.lengthInMeters) <= 0
     );
   }, [saving, productImageFiles.length, form]);
+
+  const piecesColorOptions = useMemo(() => {
+    const p = products.find((x) => x.id === piecesProductId);
+    return p?.colors ?? [];
+  }, [products, piecesProductId]);
+
+  const inrFormatter = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 });
+  const formatInr = (paise: number) => inrFormatter.format(paise / 100);
+
+  const filteredInventoryProducts = useMemo(() => {
+    const normalizedQuery = inventoryQuery.trim().toLowerCase();
+
+    return products.filter((product) => {
+      const matchesFilter =
+        inventoryFilter === "ALL" || product.stockStatus === inventoryFilter;
+      const matchesQuery =
+        normalizedQuery.length === 0 ||
+        product.name.toLowerCase().includes(normalizedQuery);
+
+      return matchesFilter && matchesQuery;
+    });
+  }, [products, inventoryFilter, inventoryQuery]);
 
   const getPreviewUrl = (file: File) => {
     const cached = previewUrlCacheRef.current.get(file);
@@ -258,8 +591,7 @@ export default function AdminPage() {
     };
   }, []);
 
-  const uploadManyImages = async (files: File[], adminToken: string) => {
-    const apiUrl = getPublicApiUrl();
+  const uploadManyImages = async (files: File[]) => {
     const uploaded: { imageUrl: string; imagePublicId: string }[] = [];
 
     // Process one image at a time to avoid freezing phones when many large photos are selected.
@@ -274,11 +606,8 @@ export default function AdminPage() {
       const uploadBody = new FormData();
       uploadBody.append("image", fileToUpload);
 
-      const uploadRes = await fetch(`${apiUrl}/api/admin/upload/imagekit`, {
+      const uploadRes = await fetch(`${ADMIN_PROXY_BASE}/upload/imagekit`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${adminToken}`,
-        },
         body: uploadBody,
       });
 
@@ -298,13 +627,58 @@ export default function AdminPage() {
     return uploaded;
   };
 
-  const loadProducts = async (adminToken: string) => {
-    const apiUrl = getPublicApiUrl();
-    const response = await fetch(`${apiUrl}/api/admin/products`, {
-      headers: {
-        Authorization: `Bearer ${adminToken}`,
-      },
-    });
+  const loadPieces = async () => {
+    if (!piecesProductId || !piecesColorId) return;
+    try {
+      setPiecesLoading(true);
+      const res = await fetch(`${ADMIN_PROXY_BASE}/products/${piecesProductId}/colors/${piecesColorId}/pieces`);
+      if (!res.ok) throw new Error("Failed to load pieces");
+      const data = await res.json() as { sku: string; pieces: AdminPiece[] };
+      setPiecesSku(data.sku);
+      setPieces(data.pieces);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Failed to load pieces");
+    } finally {
+      setPiecesLoading(false);
+    }
+  };
+
+  const loadOrders = async () => {
+    try {
+      setOrdersLoading(true);
+      const res = await fetch(`${ADMIN_PROXY_BASE}/orders`);
+      if (!res.ok) throw new Error("Failed to load orders");
+      setOrders((await res.json()) as AdminOrder[]);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Failed to load orders");
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const loadGstReport = async () => {
+    if (!gstMonth) return;
+    try {
+      setGstReportLoading(true);
+      const res = await fetch(`${ADMIN_PROXY_BASE}/reports/gst?month=${gstMonth}`);
+      if (!res.ok) throw new Error("Failed to load GST report");
+      setGstReport((await res.json()) as AdminGstReport);
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : "Failed to load GST report");
+    } finally {
+      setGstReportLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "orders" && orders.length === 0) {
+      void loadOrders();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const loadProducts = async () => {
+    const response = await fetch(`${ADMIN_PROXY_BASE}/products`);
 
     if (!response.ok) {
       throw new Error("Unable to load products");
@@ -317,6 +691,17 @@ export default function AdminPage() {
     }
   };
 
+  const loadCategories = async () => {
+    const response = await fetch(`${ADMIN_PROXY_BASE}/categories`);
+
+    if (!response.ok) {
+      throw new Error("Unable to load categories");
+    }
+
+    const data = (await response.json()) as AdminCategoryNode[];
+    setCategories(data);
+  };
+
   useEffect(() => {
     const bootstrapAndLoadProducts = async () => {
       const bootstrap = await fetch("/api/admin/bootstrap", {
@@ -326,25 +711,20 @@ export default function AdminPage() {
       if (!bootstrap.ok) {
         const payload = await bootstrap.json().catch(() => ({}));
         setLoadingProducts(false);
+        setLoadingCategories(false);
         setStatus(payload.message ?? "Admin access denied");
         return;
       }
 
-      const adminToken = getAdminTokenFromCookie();
-      if (!adminToken) {
-        setLoadingProducts(false);
-        setStatus("Unable to create admin session");
-        return;
-      }
-
       try {
-        await loadProducts(adminToken);
+        await Promise.all([loadProducts(), loadCategories()]);
       } catch (error) {
         const message =
-          error instanceof Error ? error.message : "Unable to load products";
+          error instanceof Error ? error.message : "Unable to load admin data";
         setStatus(message);
       } finally {
         setLoadingProducts(false);
+        setLoadingCategories(false);
       }
     };
 
@@ -352,12 +732,6 @@ export default function AdminPage() {
   }, []);
 
   const toggleStock = async (product: AdminProduct) => {
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
-      return;
-    }
-
     const nextStock: StockState =
       product.stockStatus === "IN_STOCK" ? "SOLD_OUT" : "IN_STOCK";
 
@@ -365,12 +739,11 @@ export default function AdminPage() {
       setStockUpdatingId(product.id);
 
       const response = await fetch(
-        `${getPublicApiUrl()}/api/admin/products/${product.id}/stock`,
+        `${ADMIN_PROXY_BASE}/products/${product.id}/stock`,
         {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
           },
           body: JSON.stringify({ stockStatus: nextStock }),
         },
@@ -399,23 +772,16 @@ export default function AdminPage() {
   };
 
   const toggleColorStock = async (productId: string, color: AdminColor) => {
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
-      return;
-    }
-
     const nextStock = color.stockQuantity > 0 ? 0 : 1;
 
     try {
       setStockUpdatingId(color.id);
       const response = await fetch(
-        `${getPublicApiUrl()}/api/admin/products/${productId}/colors/${color.id}/stock`,
+        `${ADMIN_PROXY_BASE}/products/${productId}/colors/${color.id}/stock`,
         {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
           },
           body: JSON.stringify({ stockQuantity: nextStock }),
         },
@@ -453,22 +819,100 @@ export default function AdminPage() {
     }
   };
 
-  const setDefaultColor = async (productId: string, colorId: string) => {
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
+  const restockColor = async (productId: string, colorId: string, quantity: number) => {
+    if (quantity <= 0) {
+      setStatus("Quantity must be greater than 0");
       return;
     }
 
     try {
+      setRestockingColorId(colorId);
+      const response = await fetch(
+        `${ADMIN_PROXY_BASE}/products/${productId}/colors/${colorId}/restock`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ quantity }),
+        },
+      );
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to restock");
+      }
+
+      await loadProducts();
+      setRestockQuantity("");
+      setRestockingColorId(null);
+      setStatus(`Added ${quantity} piece(s) to stock`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to restock";
+      setStatus(message);
+    } finally {
+      setRestockingColorId(null);
+    }
+  };
+
+  const hideProduct = async (productId: string) => {
+    try {
+      setStockUpdatingId(productId);
+      const response = await fetch(
+        `${ADMIN_PROXY_BASE}/products/${productId}/hide`,
+        { method: "PATCH" },
+      );
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to hide product");
+      }
+
+      await loadProducts();
+      setStatus("Product hidden");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to hide product";
+      setStatus(message);
+    } finally {
+      setStockUpdatingId(null);
+      setHideDeleteConfirmProductId(null);
+    }
+  };
+
+  const deleteProduct = async (productId: string) => {
+    try {
+      setStockUpdatingId(productId);
+      const response = await fetch(
+        `${ADMIN_PROXY_BASE}/products/${productId}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to delete product");
+      }
+
+      await loadProducts();
+      setStatus("Product deleted");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to delete product";
+      setStatus(message);
+    } finally {
+      setStockUpdatingId(null);
+      setHideDeleteConfirmProductId(null);
+    }
+  };
+
+  const setDefaultColor = async (productId: string, colorId: string) => {
+    try {
       setDefaultUpdatingId(colorId);
       const response = await fetch(
-        `${getPublicApiUrl()}/api/admin/products/${productId}/colors/${colorId}/default`,
+        `${ADMIN_PROXY_BASE}/products/${productId}/colors/${colorId}/default`,
         {
           method: "PATCH",
-          headers: {
-            Authorization: `Bearer ${adminToken}`,
-          },
         },
       );
 
@@ -505,12 +949,6 @@ export default function AdminPage() {
   const addColorVariant = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
-      return;
-    }
-
     if (!colorForm.productId || !colorForm.name.trim()) {
       setStatus("Choose a product and enter color name");
       return;
@@ -525,20 +963,21 @@ export default function AdminPage() {
       );
       const colorUploads =
         colorImageFiles.length > 0
-          ? await uploadManyImages(colorImageFiles, adminToken)
+          ? await uploadManyImages(colorImageFiles)
           : [];
 
       const response = await fetch(
-        `${getPublicApiUrl()}/api/admin/products/${colorForm.productId}/colors`,
+        `${ADMIN_PROXY_BASE}/products/${colorForm.productId}/colors`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
           },
           body: JSON.stringify({
             name: colorForm.name.trim(),
             colorCode: colorForm.colorCode.trim() || undefined,
+            borderColorName: colorForm.borderColorName.trim() || undefined,
+            borderColorCode: colorForm.borderColorCode.trim() || undefined,
             stockQuantity: Math.max(0, Number(colorForm.stockQuantity || 0)),
             isDefault: colorForm.isDefault,
             imageUploads: colorUploads,
@@ -585,6 +1024,8 @@ export default function AdminPage() {
         ...prev,
         name: "",
         colorCode: "",
+        borderColorName: "",
+        borderColorCode: "",
         stockQuantity: "0",
         isDefault: false,
       }));
@@ -606,6 +1047,151 @@ export default function AdminPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const createCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const trimmedName = categoryForm.name.trim();
+    if (!trimmedName) {
+      setStatus("Category name is required");
+      return;
+    }
+
+    try {
+      setCategorySaving(true);
+      const response = await fetch(`${ADMIN_PROXY_BASE}/categories`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: trimmedName,
+          parentId: categoryForm.parentId || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to create category");
+      }
+
+      await loadCategories();
+      setCategoryForm({ name: "", parentId: "" });
+      setStatus("Category created");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to create category";
+      setStatus(message);
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const persistProductCategories = async (
+    productId: string,
+    categoryIds: string[],
+  ) => {
+    try {
+      setProductCategorySavingId(productId);
+      const response = await fetch(
+        `${ADMIN_PROXY_BASE}/products/${productId}/categories`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ categoryIds }),
+        },
+      );
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to update product categories");
+      }
+
+      const updated = (await response.json()) as AdminProduct;
+      setProducts((previous) =>
+        previous.map((product) =>
+          product.id === productId ? updated : product,
+        ),
+      );
+      setStatus("Product categories updated");
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to update product categories";
+      setStatus(message);
+    } finally {
+      setProductCategorySavingId(null);
+    }
+  };
+
+  const toggleDraftCategory = (categoryId: string, checked: boolean) => {
+    const ancestorIds = categoryHierarchyMaps.ancestorIdsById.get(categoryId) ?? [];
+    const descendantIds = categoryHierarchyMaps.descendantIdsById.get(categoryId) ?? [];
+
+    updateField(
+      "categoryIds",
+      (() => {
+        const next = new Set(form.categoryIds);
+
+        if (checked) {
+          next.add(categoryId);
+          for (const ancestorId of ancestorIds) {
+            next.add(ancestorId);
+          }
+        } else {
+          next.delete(categoryId);
+          for (const descendantId of descendantIds) {
+            next.delete(descendantId);
+          }
+        }
+
+        // Ensure closure: any selected category implies all ancestors are selected.
+        for (const selectedId of [...next]) {
+          for (const ancestorId of categoryHierarchyMaps.ancestorIdsById.get(selectedId) ?? []) {
+            next.add(ancestorId);
+          }
+        }
+
+        return [...next];
+      })(),
+    );
+  };
+
+  const toggleInventoryProductCategory = (
+    product: AdminProduct,
+    categoryId: string,
+    checked: boolean,
+  ) => {
+    const ancestorIds = categoryHierarchyMaps.ancestorIdsById.get(categoryId) ?? [];
+    const descendantIds = categoryHierarchyMaps.descendantIdsById.get(categoryId) ?? [];
+
+    const next = new Set(product.categories.map((item) => item.id));
+
+    if (checked) {
+      next.add(categoryId);
+      for (const ancestorId of ancestorIds) {
+        next.add(ancestorId);
+      }
+    } else {
+      next.delete(categoryId);
+      for (const descendantId of descendantIds) {
+        next.delete(descendantId);
+      }
+    }
+
+    for (const selectedId of [...next]) {
+      for (const ancestorId of categoryHierarchyMaps.ancestorIdsById.get(selectedId) ?? []) {
+        next.add(ancestorId);
+      }
+    }
+
+    const nextCategoryIds = [...next];
+
+    void persistProductCategories(product.id, nextCategoryIds);
+  };
+
   const createProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -614,30 +1200,18 @@ export default function AdminPage() {
       return;
     }
 
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
-      return;
-    }
-
     try {
       setSaving(true);
       setStatus("Optimizing and uploading product images...");
 
-      const uploadedImages = await uploadManyImages(
-        productImageFiles,
-        adminToken,
-      );
+      const uploadedImages = await uploadManyImages(productImageFiles);
 
       setStatus("Creating product...");
 
-      const apiUrl = getPublicApiUrl();
-
-      const productRes = await fetch(`${apiUrl}/api/admin/products`, {
+      const productRes = await fetch(`${ADMIN_PROXY_BASE}/products`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
         },
         body: JSON.stringify({
           name: form.name.trim(),
@@ -646,10 +1220,12 @@ export default function AdminPage() {
           craft: form.craft,
           lengthInMeters: Number(form.lengthInMeters),
           blouseIncluded: form.blouseIncluded,
+          hasHandloomMark: form.hasHandloomMark,
           priceInPaise: Math.round(Number(form.priceInInr) * 100),
           imageUrl: uploadedImages[0]?.imageUrl,
           imagePublicId: uploadedImages[0]?.imagePublicId,
           imageUploads: uploadedImages,
+          categoryIds: form.categoryIds,
         }),
       });
 
@@ -668,6 +1244,7 @@ export default function AdminPage() {
         name: "",
         description: "",
         priceInInr: "",
+        categoryIds: [],
       }));
     } catch (error) {
       const message =
@@ -685,24 +1262,17 @@ export default function AdminPage() {
       return;
     }
 
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
-      return;
-    }
-
     try {
       setAppendProductLoadingId(productId);
       setStatus("Optimizing, uploading, and appending product images...");
-      const uploads = await uploadManyImages(files, adminToken);
+      const uploads = await uploadManyImages(files);
 
       const response = await fetch(
-        `${getPublicApiUrl()}/api/admin/products/${productId}/images`,
+        `${ADMIN_PROXY_BASE}/products/${productId}/images`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
           },
           body: JSON.stringify({ imageUploads: uploads }),
         },
@@ -713,7 +1283,7 @@ export default function AdminPage() {
         throw new Error(payload.message ?? "Failed to append product images");
       }
 
-      await loadProducts(adminToken);
+      await loadProducts();
       setAppendProductFiles((prev) => ({ ...prev, [productId]: [] }));
       setStatus("Product images appended");
     } catch (error) {
@@ -734,24 +1304,17 @@ export default function AdminPage() {
       return;
     }
 
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
-      return;
-    }
-
     try {
       setAppendColorLoadingId(colorId);
       setStatus("Optimizing, uploading, and appending color images...");
-      const uploads = await uploadManyImages(files, adminToken);
+      const uploads = await uploadManyImages(files);
 
       const response = await fetch(
-        `${getPublicApiUrl()}/api/admin/products/${productId}/colors/${colorId}/images`,
+        `${ADMIN_PROXY_BASE}/products/${productId}/colors/${colorId}/images`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
           },
           body: JSON.stringify({ imageUploads: uploads }),
         },
@@ -762,7 +1325,7 @@ export default function AdminPage() {
         throw new Error(payload.message ?? "Failed to append color images");
       }
 
-      await loadProducts(adminToken);
+      await loadProducts();
       setAppendColorFiles((prev) => ({ ...prev, [colorId]: [] }));
       setStatus("Color images appended");
     } catch (error) {
@@ -917,21 +1480,14 @@ export default function AdminPage() {
     const [moved] = reordered.splice(sourceIndex, 1);
     reordered.splice(targetIndex, 0, moved);
 
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
-      return;
-    }
-
     try {
       setReorderProductLoadingId(productId);
       const response = await fetch(
-        `${getPublicApiUrl()}/api/admin/products/${productId}/images/reorder`,
+        `${ADMIN_PROXY_BASE}/products/${productId}/images/reorder`,
         {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
           },
           body: JSON.stringify({
             imageIds: reordered.map((image) => image.id),
@@ -944,7 +1500,7 @@ export default function AdminPage() {
         throw new Error(payload.message ?? "Failed to reorder product images");
       }
 
-      await loadProducts(adminToken);
+      await loadProducts();
       setStatus("Product image order updated");
     } catch (error) {
       const message =
@@ -984,21 +1540,14 @@ export default function AdminPage() {
     const [moved] = reordered.splice(sourceIndex, 1);
     reordered.splice(targetIndex, 0, moved);
 
-    const adminToken = getAdminTokenFromCookie();
-    if (!adminToken) {
-      setStatus("Admin token missing. Please sign in again.");
-      return;
-    }
-
     try {
       setReorderColorLoadingId(colorId);
       const response = await fetch(
-        `${getPublicApiUrl()}/api/admin/products/${productId}/colors/${colorId}/images/reorder`,
+        `${ADMIN_PROXY_BASE}/products/${productId}/colors/${colorId}/images/reorder`,
         {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${adminToken}`,
           },
           body: JSON.stringify({
             imageIds: reordered.map((image) => image.id),
@@ -1011,7 +1560,7 @@ export default function AdminPage() {
         throw new Error(payload.message ?? "Failed to reorder color images");
       }
 
-      await loadProducts(adminToken);
+      await loadProducts();
       setStatus("Color image order updated");
     } catch (error) {
       const message =
@@ -1025,739 +1574,1051 @@ export default function AdminPage() {
   };
 
   return (
-    <main className="mx-auto max-w-md space-y-6 px-4 pb-24 pt-8">
-      <h1 className="font-serif text-4xl">Admin | Mobile</h1>
+    <main className="mx-auto max-w-7xl space-y-6 px-4 pb-24 pt-8 sm:px-6 lg:px-8">
+      <header className="space-y-1">
+        <h1 className="font-serif text-4xl text-ink">Admin Dashboard</h1>
+        <p className="text-sm text-[#6b625b]">
+          Manage catalog, colors, images, and stock across mobile and desktop.
+        </p>
+      </header>
 
-      <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur">
-        <h2 className="font-semibold">Add Item</h2>
-        <form onSubmit={createProduct} className="mt-3 space-y-3 text-sm">
-          <input
-            type="text"
-            value={form.name}
-            onChange={(event) => updateField("name", event.target.value)}
-            placeholder="Product name"
-            className="w-full rounded-xl border border-[#d7c9b7] p-2"
-          />
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={(event) =>
-              setProductImageFiles(Array.from(event.target.files ?? []))
-            }
-            className="w-full rounded-xl border border-[#d7c9b7] p-2"
-          />
-          <p className="text-xs text-[#6b625b]">
-            Product images selected: {productImageFiles.length}
-          </p>
-          <p className="text-[11px] text-[#6b625b]">
-            Photos are optimized on your device before upload.
-          </p>
-          {productImageFiles.length > 0 ? (
-            <div className="grid grid-cols-4 gap-2">
-              {productImageFiles.map((file, idx) => {
-                const previewUrl = getPreviewUrl(file);
-                return (
-                  <div
-                    key={`${file.name}-${idx}`}
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData(
-                        "text/selected-product-index",
-                        String(idx),
-                      );
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const sourceIndex = Number(
-                        event.dataTransfer.getData(
-                          "text/selected-product-index",
-                        ),
-                      );
-                      if (Number.isFinite(sourceIndex)) {
-                        reorderSelectedProductImageByDrop(sourceIndex, idx);
-                      }
-                    }}
-                    className="space-y-1 cursor-move"
-                  >
-                    <div className="relative">
-                      <img
-                        src={previewUrl}
-                        alt={`Product upload ${idx + 1}`}
-                        className="h-16 w-full rounded-lg border border-[#e2d6c8] object-cover"
-                      />
-                      <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                        {idx + 1}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-[#6b625b]">
-                      Drag to reorder
-                    </p>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => moveSelectedProductImageByStep(idx, -1)}
-                        disabled={idx === 0}
-                        className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
-                      >
-                        Prev
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveSelectedProductImageByStep(idx, 1)}
-                        disabled={idx === productImageFiles.length - 1}
-                        className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-          <div className="grid grid-cols-2 gap-2">
-            <select
-              value={form.fabric}
-              onChange={(event) =>
-                updateField(
-                  "fabric",
-                  event.target.value as ProductForm["fabric"],
-                )
-              }
-              className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-            >
-              <option value="SILK">Silk</option>
-              <option value="CHIFFON">Chiffon</option>
-              <option value="COTTON">Cotton</option>
-              <option value="GEORGETTE">Georgette</option>
-              <option value="ORGANZA">Organza</option>
-              <option value="LINEN">Linen</option>
-              <option value="CREPE">Crepe</option>
-              <option value="SATIN">Satin</option>
-            </select>
-            <select
-              value={form.craft}
-              onChange={(event) =>
-                updateField("craft", event.target.value as ProductForm["craft"])
-              }
-              className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-            >
-              <option value="BANARASI">Banarasi</option>
-              <option value="KANJEEVARAM">Kanjeevaram</option>
-              <option value="BANDHANI">Bandhani</option>
-              <option value="CHIKANKARI">Chikankari</option>
-              <option value="PAITHANI">Paithani</option>
-              <option value="PATOLA">Patola</option>
-              <option value="JAMDANI">Jamdani</option>
-              <option value="TUSSAR">Tussar</option>
-            </select>
-          </div>
-          <textarea
-            value={form.description}
-            onChange={(event) => updateField("description", event.target.value)}
-            placeholder="Description"
-            className="h-24 w-full rounded-xl border border-[#d7c9b7] p-2"
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="number"
-              step="0.1"
-              min="0.1"
-              value={form.lengthInMeters}
-              onChange={(event) =>
-                updateField("lengthInMeters", event.target.value)
-              }
-              placeholder="Length in meters"
-              className="w-full rounded-xl border border-[#d7c9b7] p-2"
-            />
-            <input
-              type="number"
-              min="1"
-              value={form.priceInInr}
-              onChange={(event) =>
-                updateField("priceInInr", event.target.value)
-              }
-              placeholder="Price in INR"
-              className="w-full rounded-xl border border-[#d7c9b7] p-2"
-            />
-          </div>
-          <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-[#5b5149]">
-            <input
-              type="checkbox"
-              checked={form.blouseIncluded}
-              onChange={(event) =>
-                updateField("blouseIncluded", event.target.checked)
-              }
-            />
-            Blouse Included
-          </label>
+      <nav className="rounded-2xl border border-[#e8ddcf] bg-white/80 p-2 shadow-sm backdrop-blur">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
           <button
-            type="submit"
-            disabled={isSubmitDisabled}
-            className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            onClick={() => setActiveTab("overview")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeTab === "overview"
+                ? "bg-wine text-white"
+                : "bg-[#f7f1e8] text-[#5b5149]"
+            }`}
           >
-            {saving ? "Saving..." : "Save Item"}
+            Overview
           </button>
-          {status ? <p className="text-xs text-[#6b625b]">{status}</p> : null}
-        </form>
-      </section>
-
-      <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur">
-        <h2 className="font-semibold">Add Color Variant</h2>
-        <form onSubmit={addColorVariant} className="mt-3 space-y-3 text-sm">
-          <select
-            value={colorForm.productId}
-            onChange={(event) =>
-              setColorForm((prev) => ({
-                ...prev,
-                productId: event.target.value,
-              }))
-            }
-            className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-          >
-            <option value="">Select product</option>
-            {products.map((product) => (
-              <option key={product.id} value={product.id}>
-                {product.name}
-              </option>
-            ))}
-          </select>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="text"
-              value={colorForm.name}
-              onChange={(event) =>
-                setColorForm((prev) => ({ ...prev, name: event.target.value }))
-              }
-              placeholder="Color name"
-              className="w-full rounded-xl border border-[#d7c9b7] p-2"
-            />
-            <input
-              type="text"
-              value={colorForm.colorCode}
-              onChange={(event) =>
-                setColorForm((prev) => ({
-                  ...prev,
-                  colorCode: event.target.value,
-                }))
-              }
-              placeholder="#RRGGBB (optional)"
-              className="w-full rounded-xl border border-[#d7c9b7] p-2"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="number"
-              min="0"
-              value={colorForm.stockQuantity}
-              onChange={(event) =>
-                setColorForm((prev) => ({
-                  ...prev,
-                  stockQuantity: event.target.value,
-                }))
-              }
-              placeholder="Stock quantity"
-              className="w-full rounded-xl border border-[#d7c9b7] p-2"
-            />
-            <label className="flex items-center gap-2 rounded-xl border border-[#d7c9b7] p-2 text-xs uppercase tracking-[0.14em] text-[#5b5149]">
-              <input
-                type="checkbox"
-                checked={colorForm.isDefault}
-                onChange={(event) =>
-                  setColorForm((prev) => ({
-                    ...prev,
-                    isDefault: event.target.checked,
-                  }))
-                }
-              />
-              Set as default
-            </label>
-          </div>
-          <input
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={(event) =>
-              setColorImageFiles(Array.from(event.target.files ?? []))
-            }
-            className="w-full rounded-xl border border-[#d7c9b7] p-2"
-          />
-          <p className="text-xs text-[#6b625b]">
-            Color images selected: {colorImageFiles.length}
-          </p>
-          <p className="text-[11px] text-[#6b625b]">
-            Photos are optimized on your device before upload.
-          </p>
-          {colorImageFiles.length > 0 ? (
-            <div className="grid grid-cols-4 gap-2">
-              {colorImageFiles.map((file, idx) => {
-                const previewUrl = getPreviewUrl(file);
-                return (
-                  <div
-                    key={`${file.name}-${idx}`}
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData(
-                        "text/selected-color-index",
-                        String(idx),
-                      );
-                    }}
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const sourceIndex = Number(
-                        event.dataTransfer.getData("text/selected-color-index"),
-                      );
-                      if (Number.isFinite(sourceIndex)) {
-                        reorderSelectedColorImageByDrop(sourceIndex, idx);
-                      }
-                    }}
-                    className="space-y-1 cursor-move"
-                  >
-                    <div className="relative">
-                      <img
-                        src={previewUrl}
-                        alt={`Color upload ${idx + 1}`}
-                        className="h-16 w-full rounded-lg border border-[#e2d6c8] object-cover"
-                      />
-                      <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                        {idx + 1}
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-[#6b625b]">
-                      Drag to reorder
-                    </p>
-                    <div className="flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => moveSelectedColorImageByStep(idx, -1)}
-                        disabled={idx === 0}
-                        className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
-                      >
-                        Prev
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveSelectedColorImageByStep(idx, 1)}
-                        disabled={idx === colorImageFiles.length - 1}
-                        className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
           <button
-            type="submit"
-            disabled={colorSubmitting}
-            className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:opacity-50"
+            type="button"
+            onClick={() => setActiveTab("add-product")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeTab === "add-product"
+                ? "bg-wine text-white"
+                : "bg-[#f7f1e8] text-[#5b5149]"
+            }`}
           >
-            {colorSubmitting ? "Adding..." : "Add Color"}
+            Add Product
           </button>
-        </form>
-      </section>
-
-      <section className="space-y-2">
-        <h2 className="font-semibold">Quick-Stock</h2>
-        {loadingProducts ? (
-          <p className="text-sm text-[#6b625b]">Loading products...</p>
-        ) : null}
-        {!loadingProducts && products.length === 0 ? (
-          <p className="text-sm text-[#6b625b]">
-            No products yet. Add your first product above.
-          </p>
-        ) : null}
-        {products.map((product) => (
-          <article
-            key={product.id}
-            className="space-y-3 rounded-2xl border border-[#e8ddcf] bg-white px-4 py-3 text-sm"
+          <button
+            type="button"
+            onClick={() => setActiveTab("add-color")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeTab === "add-color"
+                ? "bg-wine text-white"
+                : "bg-[#f7f1e8] text-[#5b5149]"
+            }`}
           >
-            <div className="flex items-center justify-between">
-              <span className="max-w-[65%] truncate font-semibold">
-                {product.name}
-              </span>
-              <button
-                type="button"
-                onClick={() => void toggleStock(product)}
-                disabled={stockUpdatingId === product.id}
-                className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs"
-              >
-                {stockUpdatingId === product.id
-                  ? "Updating..."
-                  : product.stockStatus === "IN_STOCK"
-                    ? "Mark Sold Out"
-                    : "Mark In Stock"}
-              </button>
-            </div>
-            <p className="text-xs text-[#6b625b]">
-              Product images: {product.images?.length ?? 0}
+            Add Color
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("inventory")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeTab === "inventory"
+                ? "bg-wine text-white"
+                : "bg-[#f7f1e8] text-[#5b5149]"
+            }`}
+          >
+            Inventory
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("pieces")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeTab === "pieces"
+                ? "bg-wine text-white"
+                : "bg-[#f7f1e8] text-[#5b5149]"
+            }`}
+          >
+            Pieces
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("orders")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeTab === "orders"
+                ? "bg-wine text-white"
+                : "bg-[#f7f1e8] text-[#5b5149]"
+            }`}
+          >
+            Orders
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("categories")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeTab === "categories"
+                ? "bg-wine text-white"
+                : "bg-[#f7f1e8] text-[#5b5149]"
+            }`}
+          >
+            Categories
+          </button>
+        </div>
+      </nav>
+
+      {status ? (
+        <p className="rounded-xl border border-[#e8ddcf] bg-white px-3 py-2 text-xs text-[#6b625b]">
+          {status}
+        </p>
+      ) : null}
+
+      {activeTab === "overview" ? (
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <article className="rounded-2xl border border-[#e8ddcf] bg-white p-4 shadow-sm">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-[#6b625b]">
+              Total Products
             </p>
-            {(product.images?.length ?? 0) > 0 ? (
-              <div className="space-y-2 rounded-xl border border-[#eee3d5] p-2">
-                <p className="text-[11px] text-[#6b625b]">
-                  Drag thumbnails to reorder.
+            <p className="mt-2 text-3xl font-semibold text-ink">{products.length}</p>
+          </article>
+          <article className="rounded-2xl border border-[#e8ddcf] bg-white p-4 shadow-sm">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-[#6b625b]">
+              In Stock
+            </p>
+            <p className="mt-2 text-3xl font-semibold text-ink">
+              {products.filter((item) => item.stockStatus === "IN_STOCK").length}
+            </p>
+          </article>
+          <article className="rounded-2xl border border-[#e8ddcf] bg-white p-4 shadow-sm">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-[#6b625b]">
+              Sold Out
+            </p>
+            <p className="mt-2 text-3xl font-semibold text-ink">
+              {products.filter((item) => item.stockStatus === "SOLD_OUT").length}
+            </p>
+          </article>
+          <article className="rounded-2xl border border-[#e8ddcf] bg-white p-4 shadow-sm">
+            <p className="text-[11px] uppercase tracking-[0.14em] text-[#6b625b]">
+              Next Step
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab("inventory")}
+              className="mt-3 rounded-full bg-wine px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white"
+            >
+              Open Inventory
+            </button>
+          </article>
+        </section>
+      ) : null}
+
+      {activeTab !== "overview" ? (
+      <div className="grid gap-6 lg:grid-cols-[minmax(320px,420px)_1fr] lg:items-start">
+        <div className="space-y-6 lg:sticky lg:top-6">
+          {activeTab === "add-product" ? (
+          <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+            <h2 className="font-semibold">Add Item</h2>
+            <form onSubmit={createProduct} className="mt-3 space-y-3 text-sm">
+              <input
+                type="text"
+                value={form.name}
+                onChange={(event) => updateField("name", event.target.value)}
+                placeholder="Product name"
+                className="w-full rounded-xl border border-[#d7c9b7] p-2"
+              />
+              <div className="space-y-2 rounded-xl border border-[#e8ddcf] bg-[#fcf8f2] p-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#5b5149]">
+                  Categories (optional)
                 </p>
-                {(product.images ?? [])
-                  .slice()
-                  .sort((a, b) => a.sortOrder - b.sortOrder)
-                  .map((image, idx) => (
-                    <div
-                      key={image.id}
-                      draggable
-                      onDragStart={(event) => {
-                        event.dataTransfer.setData(
-                          "text/product-image-id",
-                          image.id,
-                        );
-                      }}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        const draggedImageId = event.dataTransfer.getData(
-                          "text/product-image-id",
-                        );
-                        void reorderProductImagesByDrop(
-                          product.id,
-                          draggedImageId,
-                          image.id,
-                        );
-                      }}
-                      className="flex cursor-move items-center gap-2"
-                    >
-                      <div className="relative">
-                        <img
-                          src={image.imageUrl}
-                          alt={`${product.name} ${idx + 1}`}
-                          className="h-14 w-14 rounded-md border border-[#e2d6c8] object-cover"
-                        />
-                        <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                          {idx + 1}
-                        </span>
-                      </div>
-                      <div className="ml-auto flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void moveProductGalleryImageByStep(
-                              product.id,
-                              image.id,
-                              -1,
-                            )
-                          }
-                          disabled={
-                            reorderProductLoadingId === product.id || idx === 0
-                          }
-                          className="rounded border border-[#d7c9b7] px-1.5 py-0.5 text-[10px] disabled:opacity-40"
-                        >
-                          Prev
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void moveProductGalleryImageByStep(
-                              product.id,
-                              image.id,
-                              1,
-                            )
-                          }
-                          disabled={
-                            reorderProductLoadingId === product.id ||
-                            idx === (product.images?.length ?? 0) - 1
-                          }
-                          className="rounded border border-[#d7c9b7] px-1.5 py-0.5 text-[10px] disabled:opacity-40"
-                        >
-                          Next
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                <p className="text-[11px] text-[#6b625b]">
+                  Selecting a sub-category auto-selects all parents. Unselecting a parent removes its sub-categories.
+                </p>
+                {loadingCategories ? (
+                  <p className="text-xs text-[#6b625b]">Loading categories...</p>
+                ) : null}
+                {!loadingCategories && flatCategories.length === 0 ? (
+                  <p className="text-xs text-[#6b625b]">
+                    No categories yet. Create one in the Categories tab.
+                  </p>
+                ) : null}
+                {!loadingCategories && flatCategories.length > 0 ? (
+                  <div className="max-h-52 overflow-y-auto pr-1">
+                    <CategoryTreeSelector
+                      nodes={categories}
+                      selectedCategoryIds={form.categoryIds}
+                      onToggle={toggleDraftCategory}
+                    />
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-            <div className="space-y-2 rounded-xl border border-[#eee3d5] p-2">
               <input
                 type="file"
                 accept="image/*"
                 multiple
                 onChange={(event) =>
-                  setAppendProductFiles((prev) => ({
-                    ...prev,
-                    [product.id]: Array.from(event.target.files ?? []),
-                  }))
+                  setProductImageFiles(Array.from(event.target.files ?? []))
                 }
-                className="w-full rounded-lg border border-[#d7c9b7] p-2 text-xs"
+                className="w-full rounded-xl border border-[#d7c9b7] p-2"
               />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-[#6b625b]">
-                  Selected: {(appendProductFiles[product.id] ?? []).length}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void appendProductImages(product.id)}
-                  disabled={
-                    appendProductLoadingId === product.id ||
-                    (appendProductFiles[product.id] ?? []).length === 0
-                  }
-                  className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs disabled:opacity-50"
-                >
-                  {appendProductLoadingId === product.id
-                    ? "Appending..."
-                    : "Append Product Images"}
-                </button>
-              </div>
-              {(appendProductFiles[product.id] ?? []).length > 0 ? (
-                <div className="space-y-2">
-                  <p className="text-[11px] text-[#6b625b]">
-                    Photos are optimized on your device before upload.
-                  </p>
-                  <div className="grid grid-cols-4 gap-2">
-                    {(appendProductFiles[product.id] ?? []).map((file, idx) => {
-                      const previewUrl = getPreviewUrl(file);
-                      return (
-                        <div
-                          key={`${file.name}-${idx}`}
-                          draggable
-                          onDragStart={(event) => {
-                            event.dataTransfer.setData(
-                              "text/append-product-index",
-                              String(idx),
-                            );
-                          }}
-                          onDragOver={(event) => {
-                            event.preventDefault();
-                          }}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            const sourceIndex = Number(
-                              event.dataTransfer.getData(
-                                "text/append-product-index",
-                              ),
-                            );
-                            if (Number.isFinite(sourceIndex)) {
-                              reorderAppendProductImageByDrop(
-                                product.id,
-                                sourceIndex,
-                                idx,
-                              );
-                            }
-                          }}
-                          className="space-y-1 cursor-move"
-                        >
-                          <div className="relative">
-                            <img
-                              src={previewUrl}
-                              alt={`Append product ${idx + 1}`}
-                              className="h-14 w-full rounded-md border border-[#e2d6c8] object-cover"
-                            />
-                            <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                              {idx + 1}
-                            </span>
-                          </div>
-                          <p className="text-[10px] text-[#6b625b]">
-                            Drag to reorder
-                          </p>
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                moveAppendProductImageByStep(
-                                  product.id,
-                                  idx,
-                                  -1,
-                                )
-                              }
-                              disabled={idx === 0}
-                              className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
-                            >
-                              Prev
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                moveAppendProductImageByStep(product.id, idx, 1)
-                              }
-                              disabled={
-                                idx ===
-                                (appendProductFiles[product.id] ?? []).length -
-                                  1
-                              }
-                              className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
-                            >
-                              Next
-                            </button>
-                          </div>
+              <p className="text-xs text-[#6b625b]">
+                Product images selected: {productImageFiles.length}
+              </p>
+              <p className="text-[11px] text-[#6b625b]">
+                Photos are optimized on your device before upload.
+              </p>
+              {productImageFiles.length > 0 ? (
+                <div className="grid grid-cols-4 gap-2">
+                  {productImageFiles.map((file, idx) => {
+                    const previewUrl = getPreviewUrl(file);
+                    return (
+                      <div
+                        key={`${file.name}-${idx}`}
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData(
+                            "text/selected-product-index",
+                            String(idx),
+                          );
+                        }}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const sourceIndex = Number(
+                            event.dataTransfer.getData(
+                              "text/selected-product-index",
+                            ),
+                          );
+                          if (Number.isFinite(sourceIndex)) {
+                            reorderSelectedProductImageByDrop(sourceIndex, idx);
+                          }
+                        }}
+                        className="space-y-1 cursor-move"
+                      >
+                        <div className="relative">
+                          <img
+                            src={previewUrl}
+                            alt={`Product upload ${idx + 1}`}
+                            className="h-16 w-full rounded-lg border border-[#e2d6c8] object-cover"
+                          />
+                          <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                            {idx + 1}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
+                        <p className="text-[10px] text-[#6b625b]">
+                          Drag to reorder
+                        </p>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              moveSelectedProductImageByStep(idx, -1)
+                            }
+                            disabled={idx === 0}
+                            className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                          >
+                            Prev
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              moveSelectedProductImageByStep(idx, 1)
+                            }
+                            disabled={idx === productImageFiles.length - 1}
+                            className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : null}
-            </div>
-
-            <div className="space-y-2">
-              {product.colors.length === 0 ? (
-                <p className="text-xs text-[#6b625b]">No colors yet.</p>
-              ) : null}
-              {product.colors.map((color) => (
-                <div
-                  key={color.id}
-                  className="flex items-center justify-between rounded-xl border border-[#eee3d5] px-3 py-2"
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={form.fabric}
+                  onChange={(event) =>
+                    updateField(
+                      "fabric",
+                      event.target.value as ProductForm["fabric"],
+                    )
+                  }
+                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
                 >
-                  <div>
-                    <p className="text-sm font-medium text-ink">{color.name}</p>
-                    <p className="text-xs text-[#6b625b]">
-                      Qty {color.stockQuantity}{" "}
-                      {color.isDefault ? "| Default" : ""} | Images{" "}
-                      {color.images?.length ?? 0}
-                    </p>
-                    {(color.images?.length ?? 0) > 0 ? (
-                      <div className="mt-2 space-y-2 rounded-xl border border-[#eee3d5] p-2">
-                        <p className="text-[11px] text-[#6b625b]">
-                          Drag thumbnails to reorder.
+                  <option value="SILK">Silk</option>
+                  <option value="CHIFFON">Chiffon</option>
+                  <option value="COTTON">Cotton</option>
+                  <option value="GEORGETTE">Georgette</option>
+                  <option value="ORGANZA">Organza</option>
+                  <option value="LINEN">Linen</option>
+                  <option value="CREPE">Crepe</option>
+                  <option value="SATIN">Satin</option>
+                </select>
+                <select
+                  value={form.craft}
+                  onChange={(event) =>
+                    updateField(
+                      "craft",
+                      event.target.value as ProductForm["craft"],
+                    )
+                  }
+                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+                >
+                  <option value="BANARASI">Banarasi</option>
+                  <option value="KANJEEVARAM">Kanjeevaram</option>
+                  <option value="BANDHANI">Bandhani</option>
+                  <option value="CHIKANKARI">Chikankari</option>
+                  <option value="PAITHANI">Paithani</option>
+                  <option value="PATOLA">Patola</option>
+                  <option value="JAMDANI">Jamdani</option>
+                  <option value="TUSSAR">Tussar</option>
+                </select>
+              </div>
+              <textarea
+                value={form.description}
+                onChange={(event) =>
+                  updateField("description", event.target.value)
+                }
+                placeholder="Description"
+                className="h-24 w-full rounded-xl border border-[#d7c9b7] p-2"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  value={form.lengthInMeters}
+                  onChange={(event) =>
+                    updateField("lengthInMeters", event.target.value)
+                  }
+                  placeholder="Length in meters"
+                  className="w-full rounded-xl border border-[#d7c9b7] p-2"
+                />
+                <input
+                  type="number"
+                  min="1"
+                  value={form.priceInInr}
+                  onChange={(event) =>
+                    updateField("priceInInr", event.target.value)
+                  }
+                  placeholder="Price in INR"
+                  className="w-full rounded-xl border border-[#d7c9b7] p-2"
+                />
+              </div>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-[#5b5149]">
+                <input
+                  type="checkbox"
+                  checked={form.blouseIncluded}
+                  onChange={(event) =>
+                    updateField("blouseIncluded", event.target.checked)
+                  }
+                />
+                Blouse Included
+              </label>
+              <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-[#5b5149]">
+                <input
+                  type="checkbox"
+                  checked={form.hasHandloomMark}
+                  onChange={(event) =>
+                    updateField("hasHandloomMark", event.target.checked)
+                  }
+                />
+                Has Handloom Mark (0% GST)
+              </label>
+              <button
+                type="submit"
+                disabled={isSubmitDisabled}
+                className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? "Saving..." : "Save Item"}
+              </button>
+            </form>
+          </section>
+          ) : null}
+
+          {activeTab === "add-color" ? (
+          <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+            <h2 className="font-semibold">Add Color Variant</h2>
+            <form onSubmit={addColorVariant} className="mt-3 space-y-3 text-sm">
+              <select
+                value={colorForm.productId}
+                onChange={(event) =>
+                  setColorForm((prev) => ({
+                    ...prev,
+                    productId: event.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+              >
+                <option value="">Select product</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name}
+                  </option>
+                ))}
+              </select>
+              <div className="space-y-3">
+                <ColorPickerInput
+                  label="Body colour"
+                  colorName={colorForm.name}
+                  colorCode={colorForm.colorCode}
+                  onColorNameChange={(v) => setColorForm((p) => ({ ...p, name: v }))}
+                  onColorCodeChange={(v) => setColorForm((p) => ({ ...p, colorCode: v }))}
+                  placeholder="e.g. Crimson"
+                />
+                <ColorPickerInput
+                  label="Border colour"
+                  colorName={colorForm.borderColorName}
+                  colorCode={colorForm.borderColorCode}
+                  onColorNameChange={(v) => setColorForm((p) => ({ ...p, borderColorName: v }))}
+                  onColorCodeChange={(v) => setColorForm((p) => ({ ...p, borderColorCode: v }))}
+                  placeholder="e.g. Gold (optional)"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  value={colorForm.stockQuantity}
+                  onChange={(event) =>
+                    setColorForm((prev) => ({
+                      ...prev,
+                      stockQuantity: event.target.value,
+                    }))
+                  }
+                  placeholder="Stock quantity"
+                  className="w-full rounded-xl border border-[#d7c9b7] p-2"
+                />
+                <label className="flex items-center gap-2 rounded-xl border border-[#d7c9b7] p-2 text-xs uppercase tracking-[0.14em] text-[#5b5149]">
+                  <input
+                    type="checkbox"
+                    checked={colorForm.isDefault}
+                    onChange={(event) =>
+                      setColorForm((prev) => ({
+                        ...prev,
+                        isDefault: event.target.checked,
+                      }))
+                    }
+                  />
+                  Set as default
+                </label>
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(event) =>
+                  setColorImageFiles(Array.from(event.target.files ?? []))
+                }
+                className="w-full rounded-xl border border-[#d7c9b7] p-2"
+              />
+              <p className="text-xs text-[#6b625b]">
+                Color images selected: {colorImageFiles.length}
+              </p>
+              <p className="text-[11px] text-[#6b625b]">
+                Photos are optimized on your device before upload.
+              </p>
+              {colorImageFiles.length > 0 ? (
+                <div className="grid grid-cols-4 gap-2">
+                  {colorImageFiles.map((file, idx) => {
+                    const previewUrl = getPreviewUrl(file);
+                    return (
+                      <div
+                        key={`${file.name}-${idx}`}
+                        draggable
+                        onDragStart={(event) => {
+                          event.dataTransfer.setData(
+                            "text/selected-color-index",
+                            String(idx),
+                          );
+                        }}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                        }}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const sourceIndex = Number(
+                            event.dataTransfer.getData(
+                              "text/selected-color-index",
+                            ),
+                          );
+                          if (Number.isFinite(sourceIndex)) {
+                            reorderSelectedColorImageByDrop(sourceIndex, idx);
+                          }
+                        }}
+                        className="space-y-1 cursor-move"
+                      >
+                        <div className="relative">
+                          <img
+                            src={previewUrl}
+                            alt={`Color upload ${idx + 1}`}
+                            className="h-16 w-full rounded-lg border border-[#e2d6c8] object-cover"
+                          />
+                          <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                            {idx + 1}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-[#6b625b]">
+                          Drag to reorder
                         </p>
-                        {(color.images ?? [])
-                          .slice()
-                          .sort((a, b) => a.sortOrder - b.sortOrder)
-                          .map((image, idx) => (
-                            <div
-                              key={image.id}
-                              draggable
-                              onDragStart={(event) => {
-                                event.dataTransfer.setData(
-                                  "text/color-image-id",
-                                  image.id,
-                                );
-                              }}
-                              onDragOver={(event) => {
-                                event.preventDefault();
-                              }}
-                              onDrop={(event) => {
-                                event.preventDefault();
-                                const draggedImageId =
-                                  event.dataTransfer.getData(
-                                    "text/color-image-id",
-                                  );
-                                void reorderColorImagesByDrop(
-                                  product.id,
-                                  color.id,
-                                  draggedImageId,
-                                  image.id,
-                                );
-                              }}
-                              className="flex cursor-move items-center gap-2"
-                            >
-                              <div className="relative">
-                                <img
-                                  src={image.imageUrl}
-                                  alt={`${color.name} ${idx + 1}`}
-                                  className="h-12 w-12 rounded-md border border-[#e2d6c8] object-cover"
-                                />
-                                <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                                  {idx + 1}
-                                </span>
-                              </div>
-                              <div className="ml-auto flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void moveColorGalleryImageByStep(
-                                      product.id,
-                                      color.id,
-                                      image.id,
-                                      -1,
-                                    )
-                                  }
-                                  disabled={
-                                    reorderColorLoadingId === color.id ||
-                                    idx === 0
-                                  }
-                                  className="rounded border border-[#d7c9b7] px-1.5 py-0.5 text-[10px] disabled:opacity-40"
-                                >
-                                  Prev
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    void moveColorGalleryImageByStep(
-                                      product.id,
-                                      color.id,
-                                      image.id,
-                                      1,
-                                    )
-                                  }
-                                  disabled={
-                                    reorderColorLoadingId === color.id ||
-                                    idx === (color.images?.length ?? 0) - 1
-                                  }
-                                  className="rounded border border-[#d7c9b7] px-1.5 py-0.5 text-[10px] disabled:opacity-40"
-                                >
-                                  Next
-                                </button>
-                              </div>
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              moveSelectedColorImageByStep(idx, -1)
+                            }
+                            disabled={idx === 0}
+                            className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                          >
+                            Prev
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveSelectedColorImageByStep(idx, 1)}
+                            disabled={idx === colorImageFiles.length - 1}
+                            className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <button
+                type="submit"
+                disabled={colorSubmitting}
+                className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {colorSubmitting ? "Adding..." : "Add Color"}
+              </button>
+            </form>
+          </section>
+          ) : null}
+
+          {activeTab === "pieces" ? (
+          <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+            <h2 className="font-semibold">View Pieces &amp; Print Stickers</h2>
+            <div className="mt-3 space-y-3 text-sm">
+              <select
+                value={piecesProductId}
+                onChange={(e) => { setPiecesProductId(e.target.value); setPiecesColorId(""); setPieces([]); }}
+                className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+              >
+                <option value="">Select product</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <select
+                value={piecesColorId}
+                onChange={(e) => { setPiecesColorId(e.target.value); setPieces([]); }}
+                disabled={!piecesProductId}
+                className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2 disabled:opacity-50"
+              >
+                <option value="">Select colour variant</option>
+                {piecesColorOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}{c.sku ? ` — ${c.sku}` : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => void loadPieces()}
+                disabled={!piecesProductId || !piecesColorId || piecesLoading}
+                className="w-full rounded-full bg-wine py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-white disabled:opacity-50"
+              >
+                {piecesLoading ? "Loading..." : "Load Pieces"}
+              </button>
+            </div>
+          </section>
+          ) : null}
+
+          {activeTab === "orders" ? (
+          <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+            <h2 className="font-semibold">GST Report (GSTR-1 B2CS)</h2>
+            <div className="mt-3 space-y-3 text-sm">
+              <div className="flex gap-2">
+                <input
+                  type="month"
+                  value={gstMonth}
+                  onChange={(e) => setGstMonth(e.target.value)}
+                  className="flex-1 rounded-xl border border-[#d7c9b7] p-2"
+                />
+                <button
+                  type="button"
+                  onClick={() => void loadGstReport()}
+                  disabled={!gstMonth || gstReportLoading}
+                  className="rounded-xl border border-[#d7c9b7] px-4 py-2 text-xs font-semibold uppercase tracking-[0.1em] disabled:opacity-50"
+                >
+                  {gstReportLoading ? "..." : "Run"}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadOrders()}
+                disabled={ordersLoading}
+                className="w-full rounded-full bg-wine py-2.5 text-xs font-semibold uppercase tracking-[0.12em] text-white disabled:opacity-50"
+              >
+                {ordersLoading ? "Loading..." : "Refresh Orders"}
+              </button>
+            </div>
+          </section>
+          ) : null}
+
+          {activeTab === "categories" ? (
+            <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+              <h2 className="font-semibold">Create Category</h2>
+              <p className="mt-1 text-xs text-[#6b625b]">
+                Build one or many levels. Products can be uncategorized or mapped
+                to multiple categories.
+              </p>
+              <form onSubmit={createCategory} className="mt-3 space-y-3 text-sm">
+                <input
+                  type="text"
+                  value={categoryForm.name}
+                  onChange={(event) =>
+                    setCategoryForm((prev) => ({
+                      ...prev,
+                      name: event.target.value,
+                    }))
+                  }
+                  placeholder="Category name (e.g., Ilkal Sarees)"
+                  className="w-full rounded-xl border border-[#d7c9b7] p-2"
+                />
+                <select
+                  value={categoryForm.parentId}
+                  onChange={(event) =>
+                    setCategoryForm((prev) => ({
+                      ...prev,
+                      parentId: event.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+                >
+                  <option value="">No parent (root category)</option>
+                  {flatCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {`${"\u00A0\u00A0".repeat(category.depth)}${category.name}`}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={categorySaving}
+                  className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {categorySaving ? "Saving..." : "Create Category"}
+                </button>
+              </form>
+            </section>
+          ) : null}
+        </div>
+
+        {activeTab === "inventory" ? (
+          <section className="space-y-2">
+            <h2 className="font-semibold">Quick-Stock</h2>
+            <div className="grid gap-2 rounded-2xl border border-[#e8ddcf] bg-white p-3 sm:grid-cols-[1fr_auto] sm:items-center">
+              <input
+                type="text"
+                value={inventoryQuery}
+                onChange={(event) => setInventoryQuery(event.target.value)}
+                placeholder="Search product name"
+                className="w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
+              />
+              <select
+                value={inventoryFilter}
+                onChange={(event) =>
+                  setInventoryFilter(
+                    event.target.value as "ALL" | "IN_STOCK" | "SOLD_OUT",
+                  )
+                }
+                className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+              >
+                <option value="ALL">All Status</option>
+                <option value="IN_STOCK">In Stock</option>
+                <option value="SOLD_OUT">Sold Out</option>
+              </select>
+            </div>
+            {loadingProducts ? (
+              <p className="text-sm text-[#6b625b]">Loading products...</p>
+            ) : null}
+            {!loadingProducts && products.length === 0 ? (
+              <p className="text-sm text-[#6b625b]">
+                No products yet. Add your first product above.
+              </p>
+            ) : null}
+            {!loadingProducts && filteredInventoryProducts.length === 0 ? (
+              <p className="rounded-xl border border-[#e8ddcf] bg-white px-3 py-2 text-sm text-[#6b625b]">
+                No products match this search/filter.
+              </p>
+            ) : null}
+            {filteredInventoryProducts.map((product) => (
+              <details
+                key={product.id}
+                className="rounded-2xl border border-[#e8ddcf] bg-white px-4 py-3 text-sm"
+              >
+                <summary className="flex cursor-pointer items-center justify-between gap-2 list-none">
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-ink">{product.name}</p>
+                    <p className="text-xs text-[#6b625b]">
+                      Colors: {product.colors.length} | Categories: {product.categories.length} | Product images: {product.images?.length ?? 0}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                      product.stockStatus === "IN_STOCK"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-rose-100 text-rose-700"
+                    }`}
+                  >
+                    {product.stockStatus === "IN_STOCK" ? "In Stock" : "Sold Out"}
+                  </span>
+                </summary>
+
+                <div className="mt-3 space-y-3 border-t border-[#f0e7dc] pt-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void toggleStock(product)}
+                      disabled={stockUpdatingId === product.id}
+                      className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs"
+                    >
+                      {stockUpdatingId === product.id
+                        ? "Updating..."
+                        : product.stockStatus === "IN_STOCK"
+                          ? "Mark Sold Out"
+                          : "Mark In Stock"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHideDeleteConfirmProductId(product.id);
+                        setHideDeleteAction("hide");
+                      }}
+                      className="rounded-full border border-amber-300 px-3 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                    >
+                      Hide
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHideDeleteConfirmProductId(product.id);
+                        setHideDeleteAction("delete");
+                      }}
+                      className="rounded-full border border-rose-300 px-3 py-1 text-xs text-rose-700 hover:bg-rose-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 rounded-xl border border-[#eee3d5] bg-[#fcf8f2] p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#5b5149]">
+                        Categories
+                      </p>
+                      <span className="text-[11px] text-[#6b625b]">
+                        {product.categories.length === 0
+                          ? "Uncategorized"
+                          : `${product.categories.length} selected`}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#6b625b]">
+                      Selecting a sub-category auto-selects all parents. Unselecting a parent removes its sub-categories.
+                    </p>
+                    {flatCategories.length === 0 ? (
+                      <p className="text-xs text-[#6b625b]">
+                        No categories available. Add categories first.
+                      </p>
+                    ) : (
+                      <div className="max-h-44 overflow-y-auto pr-1">
+                        <CategoryTreeSelector
+                          nodes={categories}
+                          selectedCategoryIds={product.categories.map(
+                            (item) => item.id,
+                          )}
+                          onToggle={(categoryId, checked) =>
+                            toggleInventoryProductCategory(
+                              product,
+                              categoryId,
+                              checked,
+                            )
+                          }
+                          disabled={productCategorySavingId === product.id}
+                        />
+                      </div>
+                    )}
+                    {product.categories.length > 0 ? (
+                      <p className="text-[11px] text-[#6b625b]">
+                        {product.categories
+                          .map(
+                            (category) =>
+                              categoryPathById.get(category.id) ?? category.name,
+                          )
+                          .join(" | ")}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <p className="text-xs text-[#6b625b]">
+                    Product images: {product.images?.length ?? 0}
+                  </p>
+                  {(product.images?.length ?? 0) > 0 ? (
+                    <div className="space-y-2 rounded-xl border border-[#eee3d5] p-2">
+                      <p className="text-[11px] text-[#6b625b]">
+                        Drag thumbnails to reorder.
+                      </p>
+                      {(product.images ?? [])
+                        .slice()
+                        .sort((a, b) => a.sortOrder - b.sortOrder)
+                        .map((image, idx) => (
+                          <div
+                            key={image.id}
+                            draggable
+                            onDragStart={(event) => {
+                              event.dataTransfer.setData(
+                                "text/product-image-id",
+                                image.id,
+                              );
+                            }}
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              const draggedImageId = event.dataTransfer.getData(
+                                "text/product-image-id",
+                              );
+                              void reorderProductImagesByDrop(
+                                product.id,
+                                draggedImageId,
+                                image.id,
+                              );
+                            }}
+                            className="flex cursor-move items-center gap-2"
+                          >
+                            <div className="relative">
+                              <img
+                                src={image.imageUrl}
+                                alt={`${product.name} ${idx + 1}`}
+                                className="h-14 w-14 rounded-md border border-[#e2d6c8] object-cover"
+                              />
+                              <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                {idx + 1}
+                              </span>
                             </div>
-                          ))}
+                            <div className="ml-auto flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void moveProductGalleryImageByStep(
+                                    product.id,
+                                    image.id,
+                                    -1,
+                                  )
+                                }
+                                disabled={
+                                  reorderProductLoadingId === product.id ||
+                                  idx === 0
+                                }
+                                className="rounded border border-[#d7c9b7] px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+                              >
+                                Prev
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void moveProductGalleryImageByStep(
+                                    product.id,
+                                    image.id,
+                                    1,
+                                  )
+                                }
+                                disabled={
+                                  reorderProductLoadingId === product.id ||
+                                  idx === (product.images?.length ?? 0) - 1
+                                }
+                                className="rounded border border-[#d7c9b7] px-1.5 py-0.5 text-[10px] disabled:opacity-40"
+                              >
+                                Next
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  ) : null}
+                  <div className="space-y-2 rounded-xl border border-[#eee3d5] p-2">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(event) =>
+                        setAppendProductFiles((prev) => ({
+                          ...prev,
+                          [product.id]: Array.from(event.target.files ?? []),
+                        }))
+                      }
+                      className="w-full rounded-lg border border-[#d7c9b7] p-2 text-xs"
+                    />
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-[#6b625b]">
+                        Selected: {(appendProductFiles[product.id] ?? []).length}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void appendProductImages(product.id)}
+                        disabled={
+                          appendProductLoadingId === product.id ||
+                          (appendProductFiles[product.id] ?? []).length === 0
+                        }
+                        className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs disabled:opacity-50"
+                      >
+                        {appendProductLoadingId === product.id
+                          ? "Appending..."
+                          : "Append Product Images"}
+                      </button>
+                    </div>
+                    {(appendProductFiles[product.id] ?? []).length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-[#6b625b]">
+                          Photos are optimized on your device before upload.
+                        </p>
+                        <div className="grid grid-cols-4 gap-2">
+                          {(appendProductFiles[product.id] ?? []).map(
+                            (file, idx) => {
+                              const previewUrl = getPreviewUrl(file);
+                              return (
+                                <div
+                                  key={`${file.name}-${idx}`}
+                                  draggable
+                                  onDragStart={(event) => {
+                                    event.dataTransfer.setData(
+                                      "text/append-product-index",
+                                      String(idx),
+                                    );
+                                  }}
+                                  onDragOver={(event) => {
+                                    event.preventDefault();
+                                  }}
+                                  onDrop={(event) => {
+                                    event.preventDefault();
+                                    const sourceIndex = Number(
+                                      event.dataTransfer.getData(
+                                        "text/append-product-index",
+                                      ),
+                                    );
+                                    if (Number.isFinite(sourceIndex)) {
+                                      reorderAppendProductImageByDrop(
+                                        product.id,
+                                        sourceIndex,
+                                        idx,
+                                      );
+                                    }
+                                  }}
+                                  className="space-y-1 cursor-move"
+                                >
+                                  <div className="relative">
+                                    <img
+                                      src={previewUrl}
+                                      alt={`Append product ${idx + 1}`}
+                                      className="h-14 w-full rounded-md border border-[#e2d6c8] object-cover"
+                                    />
+                                    <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                      {idx + 1}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-[#6b625b]">
+                                    Drag to reorder
+                                  </p>
+                                  <div className="flex gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        moveAppendProductImageByStep(
+                                          product.id,
+                                          idx,
+                                          -1,
+                                        )
+                                      }
+                                      disabled={idx === 0}
+                                      className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                                    >
+                                      Prev
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        moveAppendProductImageByStep(
+                                          product.id,
+                                          idx,
+                                          1,
+                                        )
+                                      }
+                                      disabled={
+                                        idx ===
+                                        (appendProductFiles[product.id] ?? [])
+                                          .length -
+                                          1
+                                      }
+                                      className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                                    >
+                                      Next
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            },
+                          )}
+                        </div>
                       </div>
                     ) : null}
-                    <div className="mt-2 space-y-2">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={(event) =>
-                          setAppendColorFiles((prev) => ({
-                            ...prev,
-                            [color.id]: Array.from(event.target.files ?? []),
-                          }))
-                        }
-                        className="w-full rounded-lg border border-[#d7c9b7] p-2 text-xs"
-                      />
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-[#6b625b]">
-                          Selected: {(appendColorFiles[color.id] ?? []).length}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            void appendColorImages(product.id, color.id)
-                          }
-                          disabled={
-                            appendColorLoadingId === color.id ||
-                            (appendColorFiles[color.id] ?? []).length === 0
-                          }
-                          className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs disabled:opacity-50"
-                        >
-                          {appendColorLoadingId === color.id
-                            ? "Appending..."
-                            : "Append Color Images"}
-                        </button>
-                      </div>
-                      {(appendColorFiles[color.id] ?? []).length > 0 ? (
-                        <div className="space-y-2">
-                          <p className="text-[11px] text-[#6b625b]">
-                            Photos are optimized on your device before upload.
-                          </p>
-                          <div className="grid grid-cols-4 gap-2">
-                            {(appendColorFiles[color.id] ?? []).map(
-                              (file, idx) => {
-                                const previewUrl = getPreviewUrl(file);
-                                return (
+                  </div>
+
+                  <div className="space-y-2">
+                    {product.colors.length === 0 ? (
+                      <p className="text-xs text-[#6b625b]">No colors yet.</p>
+                    ) : null}
+                    {product.colors.map((color) => (
+                      <details
+                        key={color.id}
+                        className="rounded-xl border border-[#eee3d5] px-3 py-2"
+                      >
+                        <summary className="flex cursor-pointer items-center justify-between gap-2 list-none">
+                          <div>
+                            <p className="text-sm font-medium text-ink">{color.name}</p>
+                            <p className="text-xs text-[#6b625b]">
+                              Qty {color.stockQuantity} {color.isDefault ? "| Default" : ""} | Images {color.images?.length ?? 0}
+                            </p>
+                            {color.sku ? (
+                              <p className="mt-0.5 font-mono text-[11px] tracking-wide text-[#8a7560]">{color.sku}</p>
+                            ) : null}
+                            {color.borderColorName ? (
+                              <p className="text-[11px] text-[#8a7560]">Border: {color.borderColorName}</p>
+                            ) : null}
+                          </div>
+                          <span className="rounded-full bg-[#f7f1e8] px-2 py-1 text-[11px] font-semibold text-[#5b5149]">
+                            Manage
+                          </span>
+                        </summary>
+
+                        <div className="mt-3 space-y-2 border-t border-[#f0e7dc] pt-3">
+                          {(color.images?.length ?? 0) > 0 ? (
+                            <div className="mt-2 space-y-2 rounded-xl border border-[#eee3d5] p-2">
+                              <p className="text-[11px] text-[#6b625b]">
+                                Drag thumbnails to reorder.
+                              </p>
+                              {(color.images ?? [])
+                                .slice()
+                                .sort((a, b) => a.sortOrder - b.sortOrder)
+                                .map((image, idx) => (
                                   <div
-                                    key={`${file.name}-${idx}`}
+                                    key={image.id}
                                     draggable
                                     onDragStart={(event) => {
                                       event.dataTransfer.setData(
-                                        "text/append-color-index",
-                                        String(idx),
+                                        "text/color-image-id",
+                                        image.id,
                                       );
                                     }}
                                     onDragOver={(event) => {
@@ -1765,112 +2626,558 @@ export default function AdminPage() {
                                     }}
                                     onDrop={(event) => {
                                       event.preventDefault();
-                                      const sourceIndex = Number(
+                                      const draggedImageId =
                                         event.dataTransfer.getData(
-                                          "text/append-color-index",
-                                        ),
-                                      );
-                                      if (Number.isFinite(sourceIndex)) {
-                                        reorderAppendColorImageByDrop(
-                                          color.id,
-                                          sourceIndex,
-                                          idx,
+                                          "text/color-image-id",
                                         );
-                                      }
+                                      void reorderColorImagesByDrop(
+                                        product.id,
+                                        color.id,
+                                        draggedImageId,
+                                        image.id,
+                                      );
                                     }}
-                                    className="space-y-1 cursor-move"
+                                    className="flex cursor-move items-center gap-2"
                                   >
                                     <div className="relative">
                                       <img
-                                        src={previewUrl}
-                                        alt={`Append color ${idx + 1}`}
-                                        className="h-12 w-full rounded-md border border-[#e2d6c8] object-cover"
+                                        src={image.imageUrl}
+                                        alt={`${color.name} ${idx + 1}`}
+                                        className="h-12 w-12 rounded-md border border-[#e2d6c8] object-cover"
                                       />
                                       <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                                         {idx + 1}
                                       </span>
                                     </div>
-                                    <p className="text-[10px] text-[#6b625b]">
-                                      Drag to reorder
-                                    </p>
-                                    <div className="flex gap-1">
+                                    <div className="ml-auto flex items-center gap-1">
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          moveAppendColorImageByStep(
+                                          void moveColorGalleryImageByStep(
+                                            product.id,
                                             color.id,
-                                            idx,
+                                            image.id,
                                             -1,
                                           )
                                         }
-                                        disabled={idx === 0}
-                                        className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                                        disabled={
+                                          reorderColorLoadingId === color.id ||
+                                          idx === 0
+                                        }
+                                        className="rounded border border-[#d7c9b7] px-1.5 py-0.5 text-[10px] disabled:opacity-40"
                                       >
                                         Prev
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          moveAppendColorImageByStep(
+                                          void moveColorGalleryImageByStep(
+                                            product.id,
                                             color.id,
-                                            idx,
+                                            image.id,
                                             1,
                                           )
                                         }
                                         disabled={
-                                          idx ===
-                                          (appendColorFiles[color.id] ?? [])
-                                            .length -
-                                            1
+                                          reorderColorLoadingId === color.id ||
+                                          idx === (color.images?.length ?? 0) - 1
                                         }
-                                        className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                                        className="rounded border border-[#d7c9b7] px-1.5 py-0.5 text-[10px] disabled:opacity-40"
                                       >
                                         Next
                                       </button>
                                     </div>
                                   </div>
-                                );
-                              },
-                            )}
+                                ))}
+                            </div>
+                          ) : null}
+                          <div className="mt-2 space-y-2">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              onChange={(event) =>
+                                setAppendColorFiles((prev) => ({
+                                  ...prev,
+                                  [color.id]: Array.from(event.target.files ?? []),
+                                }))
+                              }
+                              className="w-full rounded-lg border border-[#d7c9b7] p-2 text-xs"
+                            />
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs text-[#6b625b]">
+                                Selected: {(appendColorFiles[color.id] ?? []).length}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  void appendColorImages(product.id, color.id)
+                                }
+                                disabled={
+                                  appendColorLoadingId === color.id ||
+                                  (appendColorFiles[color.id] ?? []).length === 0
+                                }
+                                className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs disabled:opacity-50"
+                              >
+                                {appendColorLoadingId === color.id
+                                  ? "Appending..."
+                                  : "Append Color Images"}
+                              </button>
+                            </div>
+                            {(appendColorFiles[color.id] ?? []).length > 0 ? (
+                              <div className="space-y-2">
+                                <p className="text-[11px] text-[#6b625b]">
+                                  Photos are optimized on your device before upload.
+                                </p>
+                                <div className="grid grid-cols-4 gap-2">
+                                  {(appendColorFiles[color.id] ?? []).map(
+                                    (file, idx) => {
+                                      const previewUrl = getPreviewUrl(file);
+                                      return (
+                                        <div
+                                          key={`${file.name}-${idx}`}
+                                          draggable
+                                          onDragStart={(event) => {
+                                            event.dataTransfer.setData(
+                                              "text/append-color-index",
+                                              String(idx),
+                                            );
+                                          }}
+                                          onDragOver={(event) => {
+                                            event.preventDefault();
+                                          }}
+                                          onDrop={(event) => {
+                                            event.preventDefault();
+                                            const sourceIndex = Number(
+                                              event.dataTransfer.getData(
+                                                "text/append-color-index",
+                                              ),
+                                            );
+                                            if (Number.isFinite(sourceIndex)) {
+                                              reorderAppendColorImageByDrop(
+                                                color.id,
+                                                sourceIndex,
+                                                idx,
+                                              );
+                                            }
+                                          }}
+                                          className="space-y-1 cursor-move"
+                                        >
+                                          <div className="relative">
+                                            <img
+                                              src={previewUrl}
+                                              alt={`Append color ${idx + 1}`}
+                                              className="h-12 w-full rounded-md border border-[#e2d6c8] object-cover"
+                                            />
+                                            <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                                              {idx + 1}
+                                            </span>
+                                          </div>
+                                          <p className="text-[10px] text-[#6b625b]">
+                                            Drag to reorder
+                                          </p>
+                                          <div className="flex gap-1">
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                moveAppendColorImageByStep(
+                                                  color.id,
+                                                  idx,
+                                                  -1,
+                                                )
+                                              }
+                                              disabled={idx === 0}
+                                              className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                                            >
+                                              Prev
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                moveAppendColorImageByStep(
+                                                  color.id,
+                                                  idx,
+                                                  1,
+                                                )
+                                              }
+                                              disabled={
+                                                idx ===
+                                                (appendColorFiles[color.id] ?? [])
+                                                  .length -
+                                                  1
+                                              }
+                                              className="w-full rounded border border-[#d7c9b7] px-1 py-0.5 text-[10px] disabled:opacity-40"
+                                            >
+                                              Next
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    },
+                                  )}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => void toggleColorStock(product.id, color)}
+                              disabled={stockUpdatingId === color.id}
+                              className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs"
+                            >
+                              {stockUpdatingId === color.id
+                                ? "..."
+                                : color.stockQuantity > 0
+                                  ? "Set OOS"
+                                  : "Restock (Toggle)"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void setDefaultColor(product.id, color.id)
+                              }
+                              disabled={
+                                defaultUpdatingId === color.id || color.isDefault
+                              }
+                              className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs disabled:opacity-50"
+                            >
+                              {defaultUpdatingId === color.id
+                                ? "..."
+                                : color.isDefault
+                                  ? "Default"
+                                  : "Set Default"}
+                            </button>
+                          </div>
+
+                          <div className="mt-3 rounded-xl border border-[#eee3d5] bg-[#fcf8f2] p-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#5b5149]">
+                              Bulk Restock
+                            </p>
+                            <p className="mt-1 text-[11px] text-[#6b625b]">
+                              Add multiple pieces in one go
+                            </p>
+                            <div className="mt-2 flex gap-2">
+                              <input
+                                type="number"
+                                min="1"
+                                value={restockingColorId === color.id ? restockQuantity : ""}
+                                onChange={(e) => {
+                                  if (restockingColorId === color.id) {
+                                    setRestockQuantity(e.target.value);
+                                  } else {
+                                    setRestockingColorId(color.id);
+                                    setRestockQuantity(e.target.value);
+                                  }
+                                }}
+                                placeholder="Qty"
+                                className="w-20 rounded-lg border border-[#d7c9b7] p-1.5 text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const qty = Number(restockQuantity);
+                                  if (qty > 0) {
+                                    void restockColor(product.id, color.id, qty);
+                                  }
+                                }}
+                                disabled={
+                                  restockingColorId === color.id && !restockQuantity
+                                }
+                                className="rounded-full border border-emerald-300 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                              >
+                                {restockingColorId === color.id ? "Adding..." : "Add Pieces"}
+                              </button>
+                            </div>
                           </div>
                         </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => void toggleColorStock(product.id, color)}
-                      disabled={stockUpdatingId === color.id}
-                      className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs"
-                    >
-                      {stockUpdatingId === color.id
-                        ? "..."
-                        : color.stockQuantity > 0
-                          ? "Set OOS"
-                          : "Restock"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void setDefaultColor(product.id, color.id)}
-                      disabled={
-                        defaultUpdatingId === color.id || color.isDefault
-                      }
-                      className="rounded-full border border-[#d7c9b7] px-3 py-1 text-xs disabled:opacity-50"
-                    >
-                      {defaultUpdatingId === color.id
-                        ? "..."
-                        : color.isDefault
-                          ? "Default"
-                          : "Set Default"}
-                    </button>
+                      </details>
+                    ))}
                   </div>
                 </div>
-              ))}
+              </details>
+            ))}
+          </section>
+        ) : null}
+
+        {activeTab === "pieces" ? (
+          <section className="space-y-3">
+            <h2 className="font-semibold">Physical Pieces</h2>
+            {pieces.length === 0 && !piecesLoading ? (
+              <p className="rounded-xl border border-[#e8ddcf] bg-white px-3 py-2 text-sm text-[#6b625b]">
+                Select a product and colour variant, then click Load Pieces.
+              </p>
+            ) : null}
+            {piecesLoading ? (
+              <p className="text-sm text-[#6b625b]">Loading pieces...</p>
+            ) : null}
+            {pieces.length > 0 ? (
+              <>
+                {piecesSku ? (
+                  <div className="rounded-2xl border border-[#e8ddcf] bg-white p-3">
+                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#6b625b]">Colour SKU</p>
+                    <p className="mt-1 font-mono text-sm font-semibold text-ink">{piecesSku}</p>
+                  </div>
+                ) : null}
+                <div className="overflow-hidden rounded-2xl border border-[#e8ddcf] bg-white">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-[#f0e7dc] bg-[#fcf8f2]">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-[#6b625b]">#</th>
+                        <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-[#6b625b]">Serial</th>
+                        <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-[#6b625b]">Status</th>
+                        <th className="px-3 py-2 text-left text-[11px] uppercase tracking-[0.12em] text-[#6b625b]">Sticker</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#f7f1e8]">
+                      {pieces.map((piece) => (
+                        <tr key={piece.id}>
+                          <td className="px-3 py-2 text-xs text-[#6b625b]">{piece.pieceNumber}</td>
+                          <td className="px-3 py-2 font-mono text-xs text-ink">{piece.serial}</td>
+                          <td className="px-3 py-2">
+                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                              piece.status === "AVAILABLE" ? "bg-emerald-100 text-emerald-700" :
+                              piece.status === "SOLD" ? "bg-rose-100 text-rose-700" :
+                              piece.status === "RETURNED" ? "bg-amber-100 text-amber-700" :
+                              "bg-[#f7f1e8] text-[#6b625b]"
+                            }`}>
+                              {piece.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <a
+                              href={`${ADMIN_PROXY_BASE}/pieces/${piece.serial}/qr`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-full border border-[#d7c9b7] px-2.5 py-1 text-[11px] font-semibold hover:bg-[#faf5ef]"
+                            >
+                              QR
+                            </a>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-[#6b625b]">
+                  Click QR to open the piece&apos;s QR code image in a new tab. Print it and attach to the physical saree.
+                </p>
+              </>
+            ) : null}
+          </section>
+        ) : null}
+
+        {activeTab === "orders" ? (
+          <section className="space-y-4">
+            {gstReport ? (
+              <div className="rounded-2xl border border-[#e8ddcf] bg-white p-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold">GSTR-1 B2CS Summary — {gstReport.month}</h3>
+                  <span className="text-xs text-[#6b625b]">{gstReport.invoiceCount} invoices</span>
+                </div>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="border-b border-[#f0e7dc] bg-[#fcf8f2]">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left tracking-[0.1em] text-[#6b625b]">State</th>
+                        <th className="px-2 py-1.5 text-right tracking-[0.1em] text-[#6b625b]">Rate</th>
+                        <th className="px-2 py-1.5 text-right tracking-[0.1em] text-[#6b625b]">Taxable</th>
+                        <th className="px-2 py-1.5 text-right tracking-[0.1em] text-[#6b625b]">CGST</th>
+                        <th className="px-2 py-1.5 text-right tracking-[0.1em] text-[#6b625b]">SGST</th>
+                        <th className="px-2 py-1.5 text-right tracking-[0.1em] text-[#6b625b]">IGST</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#f7f1e8]">
+                      {gstReport.b2cs.map((row, i) => (
+                        <tr key={i}>
+                          <td className="px-2 py-1.5 capitalize">{row.placeOfSupply}</td>
+                          <td className="px-2 py-1.5 text-right">{row.gstRatePercent}%</td>
+                          <td className="px-2 py-1.5 text-right">{formatInr(row.taxableAmountInPaise)}</td>
+                          <td className="px-2 py-1.5 text-right">{formatInr(row.cgstInPaise)}</td>
+                          <td className="px-2 py-1.5 text-right">{formatInr(row.sgstInPaise)}</td>
+                          <td className="px-2 py-1.5 text-right">{formatInr(row.igstInPaise)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="border-t-2 border-[#e8ddcf] font-semibold">
+                      <tr>
+                        <td className="px-2 py-1.5" colSpan={2}>Total</td>
+                        <td className="px-2 py-1.5 text-right">{formatInr(gstReport.totals.taxableAmountInPaise)}</td>
+                        <td className="px-2 py-1.5 text-right">{formatInr(gstReport.totals.cgstInPaise)}</td>
+                        <td className="px-2 py-1.5 text-right">{formatInr(gstReport.totals.sgstInPaise)}</td>
+                        <td className="px-2 py-1.5 text-right">{formatInr(gstReport.totals.igstInPaise)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            <h3 className="font-semibold">All Orders</h3>
+            {ordersLoading ? (
+              <p className="text-sm text-[#6b625b]">Loading orders...</p>
+            ) : null}
+            {!ordersLoading && orders.length === 0 ? (
+              <p className="rounded-xl border border-[#e8ddcf] bg-white px-3 py-2 text-sm text-[#6b625b]">No orders yet.</p>
+            ) : null}
+            {orders.map((order) => (
+              <div key={order.id} className="rounded-2xl border border-[#e8ddcf] bg-white p-4 text-sm">
+                <div
+                  className="flex cursor-pointer items-start justify-between gap-2"
+                  onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold text-ink">{order.customerName}</p>
+                    <p className="text-xs text-[#6b625b]">{order.customerEmail} · {order.deliveryState ?? "—"}</p>
+                    {order.invoiceNumber ? (
+                      <p className="mt-0.5 font-mono text-xs text-[#8a7560]">{order.invoiceNumber}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-shrink-0 flex-col items-end gap-1">
+                    <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                      order.status === "PAID" ? "bg-emerald-100 text-emerald-700" :
+                      order.status === "PENDING" ? "bg-amber-100 text-amber-700" :
+                      "bg-rose-100 text-rose-700"
+                    }`}>{order.status}</span>
+                    <span className="text-xs font-semibold text-ink">{formatInr(order.amountInPaise)}</span>
+                  </div>
+                </div>
+
+                {expandedOrderId === order.id ? (
+                  <div className="mt-3 space-y-3 border-t border-[#f0e7dc] pt-3 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.1em] text-[#6b625b]">Taxable</p>
+                        <p className="font-semibold">{formatInr(order.taxableAmountInPaise)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.1em] text-[#6b625b]">CGST</p>
+                        <p className="font-semibold">{formatInr(order.cgstInPaise)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.1em] text-[#6b625b]">SGST</p>
+                        <p className="font-semibold">{formatInr(order.sgstInPaise)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.1em] text-[#6b625b]">IGST</p>
+                        <p className="font-semibold">{formatInr(order.igstInPaise)}</p>
+                      </div>
+                    </div>
+                    <table className="w-full">
+                      <thead className="border-b border-[#f0e7dc] bg-[#fcf8f2]">
+                        <tr>
+                          <th className="px-2 py-1 text-left text-[10px] uppercase tracking-[0.1em] text-[#6b625b]">Product</th>
+                          <th className="px-2 py-1 text-left text-[10px] uppercase tracking-[0.1em] text-[#6b625b]">SKU</th>
+                          <th className="px-2 py-1 text-right text-[10px] uppercase tracking-[0.1em] text-[#6b625b]">Qty</th>
+                          <th className="px-2 py-1 text-right text-[10px] uppercase tracking-[0.1em] text-[#6b625b]">HSN</th>
+                          <th className="px-2 py-1 text-right text-[10px] uppercase tracking-[0.1em] text-[#6b625b]">GST%</th>
+                          <th className="px-2 py-1 text-right text-[10px] uppercase tracking-[0.1em] text-[#6b625b]">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#f7f1e8]">
+                        {order.items.map((item) => (
+                          <tr key={item.id}>
+                            <td className="px-2 py-1">{item.product.name}</td>
+                            <td className="px-2 py-1 font-mono">{item.productColor?.sku ?? "—"}</td>
+                            <td className="px-2 py-1 text-right">{item.quantity}</td>
+                            <td className="px-2 py-1 text-right">{item.hsnCode ?? "—"}</td>
+                            <td className="px-2 py-1 text-right">{item.gstRatePercent}%</td>
+                            <td className="px-2 py-1 text-right">{formatInr(item.priceAtTime * item.quantity)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {order.invoiceNumber ? (
+                      <a
+                        href={`${ADMIN_PROXY_BASE}/orders/${order.id}/invoice`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded-full border border-[#d7c9b7] px-3 py-1 text-xs font-semibold hover:bg-[#faf5ef]"
+                      >
+                        View Invoice JSON
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </section>
+        ) : null}
+
+        {activeTab === "categories" ? (
+          <section className="space-y-2">
+            <h2 className="font-semibold">Category Hierarchy</h2>
+            {loadingCategories ? (
+              <p className="text-sm text-[#6b625b]">Loading categories...</p>
+            ) : null}
+            {!loadingCategories && categories.length === 0 ? (
+              <p className="rounded-xl border border-[#e8ddcf] bg-white px-3 py-2 text-sm text-[#6b625b]">
+                No categories yet.
+              </p>
+            ) : null}
+            {!loadingCategories && categories.length > 0 ? (
+              <div className="space-y-2 rounded-2xl border border-[#e8ddcf] bg-white p-3">
+                {flatCategories.map((category) => (
+                  <div
+                    key={category.id}
+                    className="rounded-lg border border-[#efe4d7] bg-[#fcf8f2] px-3 py-2 text-sm text-[#5b5149]"
+                    style={{ marginLeft: `${category.depth * 16}px` }}
+                  >
+                    {categoryPathById.get(category.id) ?? category.name}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+      </div>
+      ) : null}
+
+      {hideDeleteConfirmProductId && hideDeleteAction ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="rounded-2xl bg-white p-6 shadow-lg max-w-sm mx-4">
+            <h3 className="font-semibold text-lg text-ink">
+              {hideDeleteAction === "hide" ? "Hide Product?" : "Delete Product?"}
+            </h3>
+            <p className="mt-2 text-sm text-[#5c4e44]">
+              {hideDeleteAction === "hide"
+                ? "This product will be hidden from listings and won't appear to customers."
+                : "This product will be permanently deleted. This action cannot be undone. (Products with paid orders cannot be deleted.)"}
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setHideDeleteConfirmProductId(null);
+                  setHideDeleteAction(null);
+                }}
+                className="flex-1 rounded-full border border-[#d7c9b7] px-4 py-2 text-sm font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (hideDeleteAction === "hide") {
+                    void hideProduct(hideDeleteConfirmProductId);
+                  } else {
+                    void deleteProduct(hideDeleteConfirmProductId);
+                  }
+                }}
+                disabled={stockUpdatingId === hideDeleteConfirmProductId}
+                className={`flex-1 rounded-full px-4 py-2 text-sm font-semibold text-white ${
+                  hideDeleteAction === "hide"
+                    ? "bg-amber-600 hover:bg-amber-700"
+                    : "bg-rose-600 hover:bg-rose-700"
+                } disabled:opacity-50`}
+              >
+                {hideDeleteAction === "hide" ? "Hide" : "Delete"}
+              </button>
             </div>
-          </article>
-        ))}
-      </section>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

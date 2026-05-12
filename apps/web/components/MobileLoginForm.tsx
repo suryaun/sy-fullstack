@@ -123,7 +123,7 @@ export default function MobileLoginForm() {
           placeholder="Mobile number"
           value={mobile}
           onChange={(event) => setMobile(event.target.value)}
-          className="w-full rounded-xl border border-[#d7c9b7] bg-white px-4 py-3 text-sm"
+          className="w-full rounded border border-[#e4d9d0] bg-white px-4 py-3 text-sm"
           required
         />
 
@@ -135,7 +135,7 @@ export default function MobileLoginForm() {
               placeholder="6-digit OTP"
               value={otp}
               onChange={(event) => setOtp(event.target.value)}
-              className="w-full rounded-xl border border-[#d7c9b7] bg-white px-4 py-3 text-sm"
+              className="w-full rounded border border-[#e4d9d0] bg-white px-4 py-3 text-sm"
               required
             />
 
@@ -146,14 +146,14 @@ export default function MobileLoginForm() {
                   placeholder="Full name (required for first sign-in)"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  className="w-full rounded-xl border border-[#d7c9b7] bg-white px-4 py-3 text-sm"
+                  className="w-full rounded border border-[#e4d9d0] bg-white px-4 py-3 text-sm"
                 />
                 <input
                   type="email"
                   placeholder="Email (required for first sign-in)"
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  className="w-full rounded-xl border border-[#d7c9b7] bg-white px-4 py-3 text-sm"
+                  className="w-full rounded border border-[#e4d9d0] bg-white px-4 py-3 text-sm"
                 />
               </>
             ) : null}
@@ -163,7 +163,7 @@ export default function MobileLoginForm() {
         <button
           type="submit"
           disabled={submitting}
-          className="w-full rounded-full bg-wine px-5 py-3 text-sm font-semibold text-ivory disabled:opacity-60"
+          className="w-full rounded-sm bg-ink px-5 py-3 text-xs uppercase tracking-[0.15em] text-[#faf8f5] transition hover:bg-wine disabled:opacity-50"
         >
           {submitting
             ? "Please wait..."
@@ -179,7 +179,7 @@ export default function MobileLoginForm() {
         </p>
       ) : null}
 
-      {message ? <p className="text-xs text-[#6b625b]">{message}</p> : null}
+      {message ? <p className="text-xs text-[#4e4038]">{message}</p> : null}
     </div>
   );
 }

@@ -47,18 +47,28 @@ enum BackInStockStatus {
   CANCELLED
 }
 
+enum PieceStatus {
+  AVAILABLE
+  SOLD
+  RETURNED
+  REMOVED
+}
+
 model Product {
   id              String      @id @default(cuid())
+  sequenceNumber  Int         @default(autoincrement())
   name            String
   description     String
   fabric          Material
   craft           Craft
   lengthInMeters  Float
   blouseIncluded  Boolean     @default(false)
+  hasHandloomMark Boolean     @default(false)
   priceInPaise    Int
   stockStatus     StockStatus @default(IN_STOCK)
   imageUrl        String
   imagePublicId   String?
+  hidden          Boolean     @default(false)
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
@@ -66,8 +76,39 @@ model Product {
   colors          ProductColor[]
   images          ProductImage[]
   notifyRequests  BackInStockRequest[]
+  productCategories ProductCategory[]
 
   @@index([stockStatus])
+  @@index([hidden])
+}
+
+model Category {
+  id                String            @id @default(cuid())
+  name              String
+  slug              String
+  parentId          String?
+  sortOrder         Int               @default(0)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  parent            Category?         @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children          Category[]        @relation("CategoryHierarchy")
+  productCategories ProductCategory[]
+
+  @@index([parentId, sortOrder])
+  @@unique([parentId, slug])
+}
+
+model ProductCategory {
+  productId         String
+  categoryId        String
+  assignedAt        DateTime          @default(now())
+
+  product           Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  category          Category          @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([productId, categoryId])
+  @@index([categoryId])
 }
 
 model ProductImage {
@@ -88,6 +129,9 @@ model ProductColor {
   productId       String
   name            String
   colorCode       String?
+  borderColorName String?
+  borderColorCode String?
+  sku             String?              @unique
   isDefault       Boolean              @default(false)
   stockQuantity   Int                  @default(0)
   priceInPaise    Int?
@@ -98,6 +142,8 @@ model ProductColor {
   product         Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   images          ProductColorImage[]
   notifyRequests  BackInStockRequest[]
+  orderItems      OrderItem[]
+  pieces          ProductPiece[]
 
   @@unique([productId, name])
   @@index([productId, isDefault])
@@ -117,38 +163,76 @@ model ProductColorImage {
   @@index([productColorId, sortOrder])
 }
 
+model ProductPiece {
+  id                   String      @id @default(cuid())
+  serial               String      @unique
+  productColorId       String
+  pieceNumber          Int
+  status               PieceStatus @default(AVAILABLE)
+  allocatedOrderItemId String?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  productColor         ProductColor @relation(fields: [productColorId], references: [id], onDelete: Restrict)
+  orderItem            OrderItem?   @relation(fields: [allocatedOrderItemId], references: [id], onDelete: SetNull)
+
+  @@unique([productColorId, pieceNumber])
+  @@index([status])
+  @@index([productColorId, status])
+}
+
 model Order {
   id                String      @id @default(cuid())
   razorpayOrderId   String?     @unique
   razorpayPaymentId String?     @unique
   razorpaySignature String?
-  status            OrderStatus @default(PENDING)
-  amountInPaise     Int
-  currency          String      @default("INR")
-  customerName      String
-  customerEmail     String
-  customerPhone     String
-  notes             Json?
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  status                  OrderStatus @default(PENDING)
+  amountInPaise           Int
+  currency                String      @default("INR")
+  customerName            String
+  customerEmail           String
+  customerPhone           String
+  deliveryState           String?
+  deliveryAddressSnapshot Json?
+  invoiceNumber           String?     @unique
+  invoiceDate             DateTime?
+  taxableAmountInPaise    Int         @default(0)
+  cgstInPaise             Int         @default(0)
+  sgstInPaise             Int         @default(0)
+  igstInPaise             Int         @default(0)
+  notes                   Json?
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
 
-  items             OrderItem[]
+  items                   OrderItem[]
 
   @@index([status])
+  @@index([invoiceNumber])
 }
 
 model OrderItem {
-  id          String   @id @default(cuid())
-  orderId     String
-  productId   String
-  quantity    Int      @default(1)
-  priceAtTime Int
+  id                   String  @id @default(cuid())
+  orderId              String
+  productId            String
+  productColorId       String?
+  colorNameAtTime      String?
+  quantity             Int     @default(1)
+  priceAtTime          Int
+  hsnCode              String?
+  gstRatePercent       Float   @default(0)
+  taxableAmountInPaise Int     @default(0)
+  cgstInPaise          Int     @default(0)
+  sgstInPaise          Int     @default(0)
+  igstInPaise          Int     @default(0)
 
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product     Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productColor ProductColor? @relation(fields: [productColorId], references: [id], onDelete: SetNull)
+  pieces       ProductPiece[]
 
   @@index([orderId])
   @@index([productId])
+  @@index([productColorId])
 }
 
 model AdminUser {
@@ -172,8 +256,32 @@ model CustomerUser {
 
   otps            MobileOtp[]
   backInStockRequests BackInStockRequest[]
+  addresses       CustomerAddress[]
 
   @@index([mobile])
+}
+
+model CustomerAddress {
+  id            String       @id @default(cuid())
+  customerId    String
+  fullName      String
+  phoneNumber   String
+  line1         String
+  line2         String?
+  landmark      String?
+  city          String
+  state         String
+  postalCode    String
+  country       String       @default("India")
+  addressType   String?
+  isDefault     Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  customer      CustomerUser @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, isDefault])
+  @@index([customerId, updatedAt])
 }
 
 model BackInStockRequest {
@@ -208,4 +316,27 @@ model MobileOtp {
 
   @@index([mobile, createdAt])
   @@index([expiresAt])
+}
+
+model InvoiceSequence {
+  financialYear String @id
+  lastSequence  Int    @default(0)
+}
+
+// Holds a short-lived stock claim while the user is in the Razorpay payment
+// modal. TTL is 10 minutes. The same customer can refresh their own reservation.
+// A different customer is blocked until the reservation expires or is released.
+model StockReservation {
+  id             String   @id @default(cuid())
+  productColorId String
+  customerId     String   // CustomerUser.id  (or a guest token for unauthenticated)
+  razorpayOrderId String? // set when the Razorpay order is created
+  quantity       Int
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([productColorId, expiresAt])
+  @@index([customerId])
+  @@index([razorpayOrderId])
 }

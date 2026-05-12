@@ -11,6 +11,18 @@ export type AuthenticatedRequest = Request & {
 };
 
 export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const expectedProxySecret = process.env.ADMIN_PROXY_SHARED_SECRET;
+  if (expectedProxySecret) {
+    const providedProxySecret = req.headers["x-admin-proxy-secret"];
+    const tokenizedSecret = Array.isArray(providedProxySecret)
+      ? providedProxySecret[0]
+      : providedProxySecret;
+
+    if (!tokenizedSecret || tokenizedSecret !== expectedProxySecret) {
+      return res.status(403).json({ message: "Admin API access must go through trusted proxy" });
+    }
+  }
+
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith("Bearer ") ? authHeader.split(" ")[1] : null;
 

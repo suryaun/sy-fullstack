@@ -1,18 +1,49 @@
 const FALLBACK_API_PORT = "4000";
 
+function buildBrowserFallbackUrl() {
+  if (typeof window === "undefined") {
+    return `http://localhost:${FALLBACK_API_PORT}`;
+  }
+
+  return `${window.location.protocol}//${window.location.hostname}:${FALLBACK_API_PORT}`;
+}
+
+function isRazorpayHost(hostname: string) {
+  return hostname === "razorpay.com" || hostname.endsWith(".razorpay.com");
+}
+
 export function getPublicApiUrl() {
   const configured = process.env.NEXT_PUBLIC_API_URL;
 
   if (typeof window === "undefined") {
-    return configured ?? `http://localhost:${FALLBACK_API_PORT}`;
+    if (!configured) {
+      return `http://localhost:${FALLBACK_API_PORT}`;
+    }
+
+    try {
+      const url = new URL(configured);
+      if (isRazorpayHost(url.hostname)) {
+        return `http://localhost:${FALLBACK_API_PORT}`;
+      }
+      return url.toString().replace(/\/$/, "");
+    } catch {
+      if (configured.includes("razorpay.com")) {
+        return `http://localhost:${FALLBACK_API_PORT}`;
+      }
+      return configured;
+    }
   }
 
   if (!configured) {
-    return `${window.location.protocol}//${window.location.hostname}:${FALLBACK_API_PORT}`;
+    return buildBrowserFallbackUrl();
   }
 
   try {
     const url = new URL(configured);
+    if (isRazorpayHost(url.hostname)) {
+      return buildBrowserFallbackUrl();
+    }
+
     const isLoopback =
       url.hostname === "localhost" ||
       url.hostname === "127.0.0.1" ||
@@ -32,6 +63,9 @@ export function getPublicApiUrl() {
 
     return url.toString().replace(/\/$/, "");
   } catch {
+    if (configured.includes("razorpay.com")) {
+      return buildBrowserFallbackUrl();
+    }
     return configured;
   }
 }

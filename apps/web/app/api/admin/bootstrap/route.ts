@@ -12,7 +12,13 @@ export async function POST() {
 
   if (!isAdminMobile(session.user.mobile)) {
     const denied = NextResponse.json({ message: "Mobile number is not allowed for admin access" }, { status: 403 });
-    denied.cookies.delete("admin_token");
+    denied.cookies.set("admin_token", "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/api/admin",
+      maxAge: 0
+    });
     return denied;
   }
 
@@ -28,16 +34,16 @@ export async function POST() {
       mobile: normalizeMobile(session.user.mobile)
     },
     secret,
-    { expiresIn: "7d" }
+    { expiresIn: "12h" }
   );
 
   const response = NextResponse.json({ ok: true });
   response.cookies.set("admin_token", token, {
-    httpOnly: false,
-    secure: false,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/api/admin",
+    maxAge: 60 * 60 * 12
   });
 
   return response;

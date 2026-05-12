@@ -20,7 +20,7 @@ export default function SocialLoginButtons() {
           key={provider.id}
           type="button"
           onClick={() => signIn(provider.id, { callbackUrl })}
-          className="w-full rounded-full border border-[#d7c9b7] bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-wine hover:text-wine"
+          className="w-full rounded-sm border border-[#e4d9d0] bg-white px-5 py-3 text-sm font-light text-ink transition hover:border-[#c5b9ae] hover:bg-[#faf8f5]"
         >
           {provider.label}
         </button>

@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import ProductDetailClient from "@/components/ProductDetailClient";
-import { catalogProducts } from "@/lib/catalog";
 
 type ApiProductColorImage = {
   imageUrl: string;
@@ -54,47 +53,6 @@ async function getProductFromApi(id: string): Promise<ApiProductDetail | null> {
   return (await response.json()) as ApiProductDetail;
 }
 
-function mapCatalogFallback(id: string) {
-  const product = catalogProducts.find((item) => item.id === id);
-  if (!product) {
-    return null;
-  }
-
-  return {
-    id: product.id,
-    name: product.name,
-    description: product.description,
-    longDescription: product.longDescription,
-    fabric: product.fabric,
-    craft: product.craft,
-    lengthInMeters: product.lengthInMeters,
-    blouseIncluded: product.blouseIncluded,
-    priceInPaise: product.priceInPaise,
-    stockStatus: product.stockStatus,
-    care: product.care,
-    work: product.work,
-    occasion: product.occasion,
-    images: product.images.map((imageUrl, index) => ({
-      imageUrl,
-      sortOrder: index,
-    })),
-    colors: [
-      {
-        id: `${product.id}-default-color`,
-        name: product.colorTone,
-        isDefault: true,
-        stockQuantity: product.stockStatus === "IN_STOCK" ? 1 : 0,
-        priceInPaise: product.priceInPaise,
-        images: product.images.map((imageUrl, index) => ({
-          imageUrl,
-          sortOrder: index,
-        })),
-      },
-    ],
-    defaultColorId: `${product.id}-default-color`,
-  };
-}
-
 export default async function ProductDetailPage({
   params,
 }: {
@@ -102,16 +60,14 @@ export default async function ProductDetailPage({
 }) {
   const { id } = await params;
   const apiProduct = await getProductFromApi(id);
-  const product = apiProduct
-    ? {
-        ...apiProduct,
-        longDescription: apiProduct.description,
-      }
-    : mapCatalogFallback(id);
-
-  if (!product) {
+  if (!apiProduct) {
     return notFound();
   }
+
+  const product = {
+    ...apiProduct,
+    longDescription: apiProduct.description,
+  };
 
   return <ProductDetailClient product={product} />;
 }
