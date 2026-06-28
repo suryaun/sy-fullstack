@@ -321,6 +321,33 @@
       }
       .amount-form .go-btn:hover { background: var(--wine); }
 
+      /* ── copy link button ── */
+      .copy-link-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+      .copy-link-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.45rem 1rem;
+        border-radius: 999px;
+        border: 1.5px solid var(--border);
+        background: transparent;
+        font-family: "Raleway", sans-serif;
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ink2);
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .copy-link-btn:hover { border-color: var(--gold); color: var(--ink); }
+      .copy-link-btn.copied { border-color: #2e7d32; color: #2e7d32; background: #e6f4ea; }
+
       /* ── footer ── */
       .pay-footer {
         text-align: center;
@@ -374,6 +401,17 @@
             <p class="pay-tag">Secure UPI Payment</p>
             <div class="pay-amount"><sup>₹</sup><span id="amount-display">—</span></div>
             <p class="pay-to">to Seere Yaana</p>
+          </div>
+
+          <!-- Copy link -->
+          <div class="copy-link-row">
+            <button class="copy-link-btn" id="copy-link-btn" onclick="copyPayLink()">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect x="4" y="4" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+                <path d="M3 8H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+              </svg>
+              Copy payment link
+            </button>
           </div>
 
           <!-- Desktop notice -->
@@ -485,6 +523,20 @@
         return APPS[app][platform].replace("AMOUNT", encodeURIComponent(amount));
       }
 
+      /* ── Copy payment link ── */
+      function copyPayLink() {
+        const url = window.location.href;
+        navigator.clipboard.writeText(url).then(() => {
+          const btn = document.getElementById('copy-link-btn');
+          btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Copied!`;
+          btn.classList.add('copied');
+          setTimeout(() => {
+            btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M3 8H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg> Copy payment link`;
+            btn.classList.remove('copied');
+          }, 2500);
+        });
+      }
+
       /* ── Open app button handler ── */
       function openApp(event, app) {
         event.preventDefault();
@@ -509,6 +561,11 @@
       /* ── Initialise payment section ── */
       function initPayment(amount) {
         currentAmount = amount;
+
+        // Update URL so the link is shareable
+        const url = new URL(window.location.href);
+        url.searchParams.set('amount', amount);
+        history.replaceState(null, '', url.toString());
 
         // Update displays
         document.getElementById("amount-display").textContent = Number(amount).toLocaleString("en-IN");
