@@ -97,6 +97,34 @@
         color: var(--ink);
       }
 
+      /* ── bank selector ── */
+      .bank-toggle {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+      }
+      .bank-btn {
+        padding: 0.75rem;
+        border-radius: 10px;
+        border: 1.5px solid var(--border);
+        background: #fff;
+        font-family: "Raleway", sans-serif;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        color: var(--ink2);
+        cursor: pointer;
+        transition: all 0.18s;
+        text-align: center;
+      }
+      .bank-btn:hover { border-color: var(--gold); color: var(--ink); }
+      .bank-btn.active {
+        background: var(--ink);
+        border-color: var(--ink);
+        color: var(--bg);
+      }
+
       /* ── form ── */
       .gen-form {
         display: flex;
@@ -238,6 +266,12 @@
         </div>
 
         <div class="gen-form">
+          <label>Receive to</label>
+          <div class="bank-toggle">
+            <button class="bank-btn active" id="btn-hdfc" onclick="selectBank('hdfc')">HDFC</button>
+            <button class="bank-btn" id="btn-sbi" onclick="selectBank('sbi')">SBI</button>
+          </div>
+
           <label for="amount-input">Amount (₹)</label>
           <input
             type="number"
@@ -287,6 +321,14 @@
 
     <script>
       const BASE_URL = window.location.origin + '/pay';
+      let selectedBank = 'hdfc';
+
+      function selectBank(bank) {
+        selectedBank = bank;
+        document.getElementById('btn-hdfc').classList.toggle('active', bank === 'hdfc');
+        document.getElementById('btn-sbi').classList.toggle('active', bank === 'sbi');
+        onInput();
+      }
 
       function buildLink() {
         const amount = parseFloat(document.getElementById('amount-input').value);
@@ -294,6 +336,7 @@
         const note = document.getElementById('note-input').value.trim();
         const url = new URL(BASE_URL);
         url.searchParams.set('amount', amount.toFixed(2));
+        url.searchParams.set('bank', selectedBank);
         if (note) url.searchParams.set('note', note);
         return url.toString();
       }

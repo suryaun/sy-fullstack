@@ -413,8 +413,12 @@
 
     <script>
       /* ── Config ── */
-      const UPI_ID   = "seereyaana11@ybl";
       const UPI_NAME = "Seere Yaana";
+      const BANK_UPI = {
+        hdfc: "seereyaana11@ybl",
+        sbi:  "seereyaana@ybl",
+      };
+      let UPI_ID = BANK_UPI.hdfc; // resolved from ?bank= param at boot
 
       /* ── App definitions ── */
       const APPS = {
@@ -518,6 +522,8 @@
         const params = new URLSearchParams(window.location.search);
         const amount = parseFloat(params.get("amount"));
         const note   = params.get("note") || '';
+        const bank   = params.get("bank") || 'hdfc';
+        UPI_ID = BANK_UPI[bank] || BANK_UPI.hdfc;
 
         if (amount && amount > 0) {
           initPayment(amount.toFixed(2), note);
