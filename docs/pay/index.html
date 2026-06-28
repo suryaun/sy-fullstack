@@ -420,26 +420,6 @@
       };
       let UPI_ID = BANK_UPI.hdfc; // resolved from ?bank= param at boot
 
-      /* ── App definitions ── */
-      const APPS = {
-        phonepe: {
-          android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}#Intent;scheme=upi;package=com.phonepe.app;end`,
-          ios:     `phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR`,
-        },
-        gpay: {
-          android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end`,
-          ios:     `tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR`,
-        },
-        paytm: {
-          android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}#Intent;scheme=upi;package=net.one97.paytm;end`,
-          ios:     `paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR`,
-        },
-        bhim: {
-          android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}#Intent;scheme=upi;package=in.org.npci.upiapp;end`,
-          ios:     `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR`,
-        },
-      };
-
       /* ── State ── */
       let currentAmount = null;
       let currentNote   = '';
@@ -457,10 +437,26 @@
 
       function buildAppLink(app, amount, note) {
         const platform = isAndroid() ? "android" : "ios";
-        const tn = encodeURIComponent(note || 'Payment to Seere Yaana');
-        return APPS[app][platform]
-          .replace("AMOUNT", encodeURIComponent(amount))
-          .replace(encodeURIComponent('Payment to Seere Yaana'), tn);
+        const tn = note || 'Payment to Seere Yaana';
+        const base = {
+          phonepe: {
+            android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(tn)}#Intent;scheme=upi;package=com.phonepe.app;end`,
+            ios:     `phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`,
+          },
+          gpay: {
+            android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(tn)}#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end`,
+            ios:     `tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`,
+          },
+          paytm: {
+            android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(tn)}#Intent;scheme=upi;package=net.one97.paytm;end`,
+            ios:     `paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`,
+          },
+          bhim: {
+            android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(tn)}#Intent;scheme=upi;package=in.org.npci.upiapp;end`,
+            ios:     `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`,
+          },
+        };
+        return base[app][platform];
       }
 
       /* ── Copy link from the entry form ── */
@@ -508,7 +504,6 @@
         document.getElementById("btn-other").href = buildUPILink(amount, currentNote);
 
         // Show payment section
-        document.getElementById("amount-form-section").style.display = "none";
         document.getElementById("payment-section").style.display    = "block";
 
         // Generate QR
