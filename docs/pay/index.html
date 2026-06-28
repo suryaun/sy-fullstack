@@ -473,10 +473,10 @@
       }
 
       /* ── Generate QR ── */
-      function generateQR(amount) {
+      function generateQR(amount, note) {
         try {
           var qr = qrcode(0, 'M');
-          qr.addData(buildUPILink(amount));
+          qr.addData(buildUPILink(amount, note));
           qr.make();
           var container = document.getElementById('qr-canvas');
           container.innerHTML = qr.createImgTag(5, 2, 'UPI payment QR code');
@@ -517,7 +517,7 @@
         document.getElementById("payment-section").style.display    = "block";
 
         // Generate QR
-        generateQR(amount);
+        generateQR(amount, currentNote);
       }
 
       /* ── Amount form submit ── */
