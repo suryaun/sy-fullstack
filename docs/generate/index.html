@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Generate a UPI payment link for Seere Yaana." />
+    <title>Generate Payment Link · Seere Yaana</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Italiana&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Raleway:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      :root {
+        --bg:     #faf8f5;
+        --bg2:    #f3ede6;
+        --ink:    #1a1512;
+        --ink2:   #5c4a42;
+        --gold:   #c7a56a;
+        --wine:   #6a1f2b;
+        --border: #e4d9d0;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { scroll-behavior: smooth; }
+
+      body {
+        font-family: "Raleway", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── header ── */
+      .hdr {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.1rem 2rem;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+      }
+      .hdr a {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        text-decoration: none;
+      }
+      .hdr-logo {
+        width: 72px; height: 72px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 1px solid var(--border);
+      }
+      .hdr-wordmark { height: 80px; width: auto; }
+
+      /* ── layout ── */
+      main {
+        flex: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+
+      .gen-card {
+        width: 100%;
+        max-width: 400px;
+        display: flex;
+        flex-direction: column;
+        gap: 1.75rem;
+      }
+
+      /* ── heading ── */
+      .gen-heading {
+        text-align: center;
+      }
+      .gen-tag {
+        font-size: 0.6875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.42em;
+        color: var(--gold);
+        font-weight: 600;
+        margin-bottom: 0.6rem;
+      }
+      .gen-title {
+        font-family: "Cormorant Garamond", serif;
+        font-size: clamp(1.8rem, 6vw, 2.6rem);
+        font-weight: 400;
+        line-height: 1.2;
+        color: var(--ink);
+      }
+
+      /* ── form ── */
+      .gen-form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+      }
+      .gen-form label {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--ink2);
+        font-weight: 600;
+      }
+      .gen-form input[type="number"],
+      .gen-form input[type="text"] {
+        width: 100%;
+        padding: 0.9rem 1rem;
+        border: 1.5px solid var(--border);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--ink);
+        outline: none;
+        transition: border-color 0.2s;
+      }
+      .gen-form input[type="number"] {
+        font-family: "Cormorant Garamond", serif;
+        font-size: 1.6rem;
+        font-weight: 400;
+        text-align: center;
+      }
+      .gen-form input[type="text"] {
+        font-family: "Raleway", sans-serif;
+        font-size: 0.95rem;
+        text-align: center;
+      }
+      .gen-form input:focus { border-color: var(--gold); }
+      .gen-form input::placeholder { opacity: 0.4; }
+
+      /* ── URL preview ── */
+      .url-preview {
+        display: none;
+        align-items: center;
+        gap: 0;
+        border: 1.5px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--bg2);
+      }
+      .url-preview.visible { display: flex; }
+      .url-preview-text {
+        flex: 1;
+        padding: 0.7rem 0.9rem;
+        font-size: 0.72rem;
+        color: var(--ink2);
+        font-family: "Raleway", sans-serif;
+        letter-spacing: 0.02em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        direction: rtl;
+        text-align: left;
+      }
+
+      /* ── buttons ── */
+      .btn-copy {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.9rem;
+        border-radius: 10px;
+        border: none;
+        background: var(--ink);
+        color: var(--bg);
+        font-family: "Raleway", sans-serif;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .btn-copy:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+      .btn-copy:not(:disabled):hover { background: var(--wine); }
+      .btn-copy.copied { background: #2e7d32; }
+
+      .btn-open {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        padding: 0.75rem;
+        border-radius: 10px;
+        border: 1.5px solid var(--border);
+        background: transparent;
+        color: var(--ink2);
+        font-family: "Raleway", sans-serif;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        text-decoration: none;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .btn-open:not([href="#"]):hover {
+        border-color: var(--gold);
+        color: var(--ink);
+      }
+      .btn-open[href="#"] { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+
+      .footer-note {
+        text-align: center;
+        font-size: 0.7rem;
+        color: var(--ink2);
+        opacity: 0.5;
+        letter-spacing: 0.05em;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="hdr">
+      <a href="https://seereyaana.com" aria-label="Seere Yaana home">
+        <img class="hdr-logo" src="../assets/hero-ilkal.webp" alt="" aria-hidden="true" />
+        <img class="hdr-wordmark" src="../assets/wordmark.png" alt="Seere Yaana" />
+      </a>
+    </header>
+
+    <main>
+      <div class="gen-card">
+
+        <div class="gen-heading">
+          <p class="gen-tag">Merchant</p>
+          <h1 class="gen-title">Generate Payment Link</h1>
+        </div>
+
+        <div class="gen-form">
+          <label for="amount-input">Amount (₹)</label>
+          <input
+            type="number"
+            id="amount-input"
+            placeholder="e.g. 2000"
+            min="1"
+            inputmode="numeric"
+            oninput="onInput()"
+          />
+
+          <label for="note-input">
+            Description
+            <span style="font-weight:400;text-transform:none;letter-spacing:0;opacity:0.6;"> (optional)</span>
+          </label>
+          <input
+            type="text"
+            id="note-input"
+            placeholder="e.g. Ilkal saree order"
+            maxlength="50"
+            oninput="onInput()"
+          />
+        </div>
+
+        <!-- Generated URL preview -->
+        <div class="url-preview" id="url-preview">
+          <span class="url-preview-text" id="url-preview-text"></span>
+        </div>
+
+        <!-- Copy button -->
+        <button class="btn-copy" id="btn-copy" onclick="copyLink()" disabled>
+          <svg width="13" height="13" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <rect x="4" y="4" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M3 8H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          Copy payment link
+        </button>
+
+        <!-- Open in pay page -->
+        <a class="btn-open" id="btn-open" href="#">
+          Open payment page ↗
+        </a>
+
+        <p class="footer-note">Share the copied link via WhatsApp, SMS, or Instagram</p>
+
+      </div>
+    </main>
+
+    <script>
+      const BASE_URL = window.location.origin + '/pay';
+
+      function buildLink() {
+        const amount = parseFloat(document.getElementById('amount-input').value);
+        if (!amount || amount <= 0) return null;
+        const note = document.getElementById('note-input').value.trim();
+        const url = new URL(BASE_URL);
+        url.searchParams.set('amount', amount.toFixed(2));
+        if (note) url.searchParams.set('note', note);
+        return url.toString();
+      }
+
+      function onInput() {
+        const link = buildLink();
+        const copyBtn = document.getElementById('btn-copy');
+        const openBtn = document.getElementById('btn-open');
+        const preview = document.getElementById('url-preview');
+        const previewText = document.getElementById('url-preview-text');
+
+        if (link) {
+          copyBtn.disabled = false;
+          openBtn.href = link;
+          previewText.textContent = link;
+          preview.classList.add('visible');
+        } else {
+          copyBtn.disabled = true;
+          openBtn.href = '#';
+          preview.classList.remove('visible');
+        }
+      }
+
+      function copyLink() {
+        const link = buildLink();
+        if (!link) return;
+        navigator.clipboard.writeText(link).then(() => {
+          const btn = document.getElementById('btn-copy');
+          const orig = btn.innerHTML;
+          btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Copied!`;
+          btn.classList.add('copied');
+          setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2500);
+        });
+      }
+    </script>
+  </body>
+</html>

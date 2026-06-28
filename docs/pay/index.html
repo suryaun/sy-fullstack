@@ -275,82 +275,29 @@
       }
 
       /* ── missing-amount state ── */
-      .amount-form {
+      .amount-form { display: none; }
+
+      /* ── invalid link state ── */
+      .invalid-section {
+        text-align: center;
+        padding: 3rem 1rem;
         display: flex;
         flex-direction: column;
-        gap: 0.75rem;
+        align-items: center;
+        gap: 1rem;
       }
-      .amount-form label {
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.2em;
-        color: var(--ink2);
-        font-weight: 600;
-      }
-      .amount-form input {
-        width: 100%;
-        padding: 0.9rem 1rem;
+      .invalid-title {
         font-family: "Cormorant Garamond", serif;
-        font-size: 1.6rem;
+        font-size: 2rem;
         font-weight: 400;
-        border: 1.5px solid var(--border);
-        border-radius: 10px;
-        background: #fff;
         color: var(--ink);
-        outline: none;
-        transition: border-color 0.2s;
-        text-align: center;
       }
-      .amount-form input:focus { border-color: var(--gold); }
-      .amount-form .go-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0.9rem;
-        border-radius: 10px;
-        background: var(--ink);
-        color: var(--bg);
-        font-family: "Raleway", sans-serif;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.18em;
-        border: none;
-        cursor: pointer;
-        transition: background 0.2s;
-      }
-      .amount-form .go-btn:hover { background: var(--wine); }
-
-      /* ── copy link button ── */
-      .copy-link-row {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .copy-link-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        padding: 0.55rem 1.25rem;
-        border-radius: 999px;
-        border: 1.5px solid var(--border);
-        background: transparent;
-        font-family: "Raleway", sans-serif;
-        font-size: 0.68rem;
-        font-weight: 600;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
+      .invalid-sub {
+        font-size: 0.82rem;
         color: var(--ink2);
-        cursor: pointer;
-        transition: all 0.2s;
+        line-height: 1.6;
+        max-width: 28ch;
       }
-      .copy-link-btn:disabled {
-        opacity: 0.35;
-        cursor: not-allowed;
-        pointer-events: none;
-      }
-      .copy-link-btn:not(:disabled):hover { border-color: var(--gold); color: var(--ink); }
-      .copy-link-btn.copied { border-color: #2e7d32; color: #2e7d32; background: #e6f4ea; }
 
       /* ── footer ── */
       .pay-footer {
@@ -381,38 +328,11 @@
 
     <main>
       <div class="pay-card" id="pay-card">
-        <!-- Amount entry form (shown when no ?amount= in URL) -->
-        <div id="amount-form-section" style="display:none;">
-          <div class="pay-tag">Payment amount</div>
-          <div class="amount-form">
-            <label for="amount-input">Enter amount (₹)</label>
-            <input
-              type="number"
-              id="amount-input"
-              placeholder="e.g. 2000"
-              min="1"
-              inputmode="numeric"
-              oninput="onAmountInput()"
-            />
-            <label for="note-input" style="margin-top:0.25rem;">Description <span style="font-weight:400;text-transform:none;letter-spacing:0;opacity:0.6;">(optional)</span></label>
-            <input
-              type="text"
-              id="note-input"
-              placeholder="e.g. Ilkal saree order"
-              maxlength="50"
-              oninput="onAmountInput()"
-            />
-            <div class="copy-link-row" style="margin-top:0.25rem;">
-              <button class="copy-link-btn" id="copy-link-btn" onclick="copyFormLink()" disabled>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <rect x="4" y="4" width="7" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                  <path d="M3 8H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                </svg>
-                Copy payment link
-              </button>
-            </div>
-            <button class="go-btn" onclick="applyAmount()">Continue →</button>
-          </div>
+        <!-- Invalid link (shown when no ?amount= in URL) -->
+        <div id="invalid-section" style="display:none;" class="invalid-section">
+          <div style="font-size:2.5rem;">🔗</div>
+          <div class="invalid-title">Invalid Link</div>
+          <p class="invalid-sub">This payment link is missing an amount. Please request a valid link from Seere Yaana.</p>
         </div>
 
         <!-- Payment section (shown when amount is known) -->
@@ -520,12 +440,6 @@
       let currentAmount = null;
       let currentNote   = '';
 
-      /* ── Enable copy button when amount is filled ── */
-      function onAmountInput() {
-        const val = parseFloat(document.getElementById('amount-input').value);
-        document.getElementById('copy-link-btn').disabled = !(val > 0);
-      }
-
       /* ── Platform detection ── */
       function isAndroid() { return /android/i.test(navigator.userAgent); }
       function isIOS()     { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
@@ -546,21 +460,6 @@
       }
 
       /* ── Copy link from the entry form ── */
-      function copyFormLink() {
-        const amount = parseFloat(document.getElementById('amount-input').value);
-        if (!amount || amount <= 0) return;
-        const note = document.getElementById('note-input').value.trim();
-        const url = new URL(window.location.origin + window.location.pathname);
-        url.searchParams.set('amount', amount.toFixed(2));
-        if (note) url.searchParams.set('note', note);
-        navigator.clipboard.writeText(url.toString()).then(() => {
-          const btn = document.getElementById('copy-link-btn');
-          const orig = btn.innerHTML;
-          btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Copied!`;
-          btn.classList.add('copied');
-          setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2500);
-        });
-      }
 
       /* ── Open app button handler ── */
       function openApp(event, app) {
@@ -613,22 +512,6 @@
       }
 
       /* ── Amount form submit ── */
-      function applyAmount() {
-        const input = document.getElementById("amount-input");
-        const val   = parseFloat(input.value);
-        if (!val || val <= 0) {
-          input.focus();
-          input.style.borderColor = "var(--wine)";
-          setTimeout(() => { input.style.borderColor = ""; }, 1500);
-          return;
-        }
-        const note = document.getElementById('note-input').value.trim();
-        initPayment(val.toFixed(2), note);
-      }
-      document.addEventListener("DOMContentLoaded", () => {
-        document.getElementById("amount-input")
-          .addEventListener("keydown", e => { if (e.key === "Enter") applyAmount(); });
-      });
 
       /* ── Boot: parse URL params ── */
       (function boot() {
@@ -639,7 +522,7 @@
         if (amount && amount > 0) {
           initPayment(amount.toFixed(2), note);
         } else {
-          document.getElementById("amount-form-section").style.display = "block";
+          document.getElementById('invalid-section').style.display = 'flex';
         }
       })();
     </script>
