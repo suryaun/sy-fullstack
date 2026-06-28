@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Italiana&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Raleway:wght@300;400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Italiana&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Raleway:wght@300;400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
 
@@ -98,17 +98,20 @@
         margin-bottom: 0.75rem;
       }
       .pay-amount {
-        font-family: "Cormorant Garamond", serif;
-        font-size: clamp(3rem, 14vw, 5rem);
-        font-weight: 400;
+        font-family: "DM Sans", system-ui, sans-serif;
+        font-size: clamp(2.6rem, 12vw, 4.5rem);
+        font-weight: 700;
         line-height: 1;
         color: var(--ink);
-        letter-spacing: -0.01em;
+        letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum";
       }
       .pay-amount sup {
-        font-size: 0.45em;
+        font-size: 0.42em;
         vertical-align: super;
-        font-weight: 300;
+        font-weight: 500;
+        letter-spacing: 0;
       }
       .pay-to {
         margin-top: 0.5rem;
@@ -495,9 +498,16 @@
         history.replaceState(null, '', url.toString());
 
         // Update displays
-        document.getElementById("amount-display").textContent = Number(amount).toLocaleString("en-IN");
+        function formatAmount(raw) {
+          const n = Number(raw);
+          return n % 1 === 0
+            ? n.toLocaleString("en-IN")
+            : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        document.getElementById("amount-display").textContent = formatAmount(amount);
         document.querySelectorAll(".ref-amount").forEach(el => {
-          el.textContent = Number(amount).toLocaleString("en-IN");
+          el.textContent = formatAmount(amount);
         });
 
         // Set Other button href (generic UPI chooser)
