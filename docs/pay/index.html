@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Pay Seere Yaana securely via UPI." />
+    <title>Pay · Seere Yaana</title>
+
+    <!-- Fonts (same as main site) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Italiana&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Raleway:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- QR Code generator (local, MIT) -->
+    <script src="../assets/qrcode.js"></script>
+
+    <style>
+      /* ── design tokens (matches main site) ── */
+      :root {
+        --bg:     #faf8f5;
+        --bg2:    #f3ede6;
+        --ink:    #1a1512;
+        --ink2:   #5c4a42;
+        --gold:   #c7a56a;
+        --wine:   #6a1f2b;
+        --border: #e4d9d0;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { scroll-behavior: smooth; }
+
+      body {
+        font-family: "Raleway", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      /* ── minimal header ── */
+      .hdr {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.1rem 2rem;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg);
+      }
+      .hdr a {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        text-decoration: none;
+      }
+      .hdr-logo {
+        width: 72px; height: 72px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 1px solid var(--border);
+      }
+      .hdr-wordmark {
+        height: 80px;
+        width: auto;
+      }
+
+      /* ── page layout ── */
+      main {
+        flex: 1;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+
+      .pay-card {
+        width: 100%;
+        max-width: 400px;
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+      }
+
+      /* ── amount block ── */
+      .pay-hero {
+        text-align: center;
+      }
+      .pay-tag {
+        font-size: 0.6875rem;
+        text-transform: uppercase;
+        letter-spacing: 0.42em;
+        color: var(--gold);
+        font-weight: 600;
+        margin-bottom: 0.75rem;
+      }
+      .pay-amount {
+        font-family: "Cormorant Garamond", serif;
+        font-size: clamp(3rem, 14vw, 5rem);
+        font-weight: 400;
+        line-height: 1;
+        color: var(--ink);
+        letter-spacing: -0.01em;
+      }
+      .pay-amount sup {
+        font-size: 0.45em;
+        vertical-align: super;
+        font-weight: 300;
+      }
+      .pay-to {
+        margin-top: 0.5rem;
+        font-size: 0.8rem;
+        letter-spacing: 0.15em;
+        color: var(--ink2);
+        text-transform: uppercase;
+        font-weight: 500;
+      }
+
+      /* ── divider ── */
+      .divider {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        color: var(--ink2);
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        font-weight: 500;
+      }
+      .divider::before, .divider::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--border);
+      }
+
+      /* ── app buttons grid ── */
+      .apps-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+      }
+
+      .app-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 1.1rem 0.5rem;
+        border-radius: 14px;
+        border: 1.5px solid var(--border);
+        background: #fff;
+        cursor: pointer;
+        font-family: "Raleway", sans-serif;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        color: var(--ink);
+        text-transform: uppercase;
+        transition: all 0.22s ease;
+        text-decoration: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .app-btn:hover, .app-btn:active {
+        transform: translateY(-2px);
+        border-color: var(--gold);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+      }
+      .app-btn:active { transform: translateY(0); }
+
+      .app-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+
+      /* app brand colours */
+      .icon-phonepe { background: #5f259f; }
+      .icon-gpay    { background: #fff; border: 1.5px solid #e8e8e8; }
+      .icon-paytm   { background: #002970; }
+      .icon-bhim    { background: #00419D; }
+
+      .app-icon img { display: block; width: 26px; height: 26px; }
+      .icon-bhim img, .icon-gpay img {
+        width: 44px; height: 44px;
+        object-fit: cover;
+        border-radius: 12px;
+      }
+
+      /* ── QR section ── */
+      .qr-section {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1rem;
+      }
+      .qr-wrap {
+        padding: 1rem;
+        background: #fff;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #qr-canvas img {
+        display: block;
+        width: 200px;
+        height: 200px;
+      }
+      .qr-note {
+        font-size: 0.78rem;
+        color: var(--ink2);
+        letter-spacing: 0.05em;
+        text-align: center;
+      }
+
+      /* ── mobile-only: hidden on desktop pointer devices ── */
+      .mobile-only { display: contents; }
+
+      /* ── Other UPI button (full-width) ── */
+      .other-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        width: 100%;
+        padding: 1rem;
+        border-radius: 14px;
+        border: 1.5px solid var(--border);
+        background: #fff;
+        cursor: pointer;
+        font-family: "Raleway", sans-serif;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        color: var(--ink);
+        text-transform: uppercase;
+        text-decoration: none;
+        transition: all 0.22s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .other-btn:hover, .other-btn:active {
+        border-color: var(--gold);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+        transform: translateY(-2px);
+      }
+      .other-btn:active { transform: translateY(0); }
+      .other-btn .app-icon {
+        background: var(--ink);
+        flex-shrink: 0;
+      }
+
+      /* ── desktop notice ── */
+      .desktop-notice {
+        display: none;
+        text-align: center;
+        padding: 1rem 1.25rem;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 0.82rem;
+        color: var(--ink2);
+        line-height: 1.6;
+      }
+
+      /* ── missing-amount state ── */
+      .amount-form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      .amount-form label {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        color: var(--ink2);
+        font-weight: 600;
+      }
+      .amount-form input {
+        width: 100%;
+        padding: 0.9rem 1rem;
+        font-family: "Cormorant Garamond", serif;
+        font-size: 1.6rem;
+        font-weight: 400;
+        border: 1.5px solid var(--border);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--ink);
+        outline: none;
+        transition: border-color 0.2s;
+        text-align: center;
+      }
+      .amount-form input:focus { border-color: var(--gold); }
+      .amount-form .go-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.9rem;
+        border-radius: 10px;
+        background: var(--ink);
+        color: var(--bg);
+        font-family: "Raleway", sans-serif;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        border: none;
+        cursor: pointer;
+        transition: background 0.2s;
+      }
+      .amount-form .go-btn:hover { background: var(--wine); }
+
+      /* ── footer ── */
+      .pay-footer {
+        text-align: center;
+        font-size: 0.7rem;
+        color: var(--ink2);
+        opacity: 0.6;
+        padding: 0 0 0.5rem;
+        letter-spacing: 0.05em;
+      }
+
+      /* desktop (non-touch): show notice, hide mobile-only sections */
+      @media (hover: hover) and (pointer: fine) {
+        .desktop-notice { display: block; }
+        .mobile-only { display: none; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- ── Header ── -->
+    <header class="hdr">
+      <a href="https://seereyaana.com" aria-label="Seere Yaana home">
+        <img class="hdr-logo" src="../assets/hero-ilkal.webp" alt="" aria-hidden="true" />
+        <img class="hdr-wordmark" src="../assets/wordmark.png" alt="Seere Yaana" />
+      </a>
+    </header>
+
+    <main>
+      <div class="pay-card" id="pay-card">
+        <!-- Amount entry form (shown when no ?amount= in URL) -->
+        <div id="amount-form-section" style="display:none;">
+          <div class="pay-tag">Payment amount</div>
+          <div class="amount-form">
+            <label for="amount-input">Enter amount (₹)</label>
+            <input
+              type="number"
+              id="amount-input"
+              placeholder="e.g. 2000"
+              min="1"
+              inputmode="numeric"
+            />
+            <button class="go-btn" onclick="applyAmount()">Continue →</button>
+          </div>
+        </div>
+
+        <!-- Payment section (shown when amount is known) -->
+        <div id="payment-section" style="display:none;">
+
+          <!-- Amount display -->
+          <div class="pay-hero">
+            <p class="pay-tag">Secure UPI Payment</p>
+            <div class="pay-amount"><sup>₹</sup><span id="amount-display">—</span></div>
+            <p class="pay-to">to Seere Yaana</p>
+          </div>
+
+          <!-- Desktop notice -->
+          <div class="desktop-notice">
+            UPI deep links only work on mobile.<br>
+            Open this link on your phone, or scan the QR code below.
+          </div>
+
+          <!-- App buttons (mobile only) -->
+          <div class="mobile-only">
+            <div class="divider" style="margin-bottom:1rem;">Pay via</div>
+            <div class="apps-grid">
+              <a class="app-btn" id="btn-phonepe" href="#" onclick="openApp(event,'phonepe')">
+                <span class="app-icon icon-phonepe">
+                  <img src="../assets/phonepe.svg" alt="PhonePe" />
+                </span>
+                PhonePe
+              </a>
+
+              <a class="app-btn" id="btn-gpay" href="#" onclick="openApp(event,'gpay')">
+                <span class="app-icon icon-gpay">
+                  <img src="../assets/google-pay-logo.png" alt="Google Pay" />
+                </span>
+                Google Pay
+              </a>
+
+              <a class="app-btn" id="btn-paytm" href="#" onclick="openApp(event,'paytm')">
+                <span class="app-icon icon-paytm">
+                  <img src="../assets/paytm.svg" alt="Paytm" />
+                </span>
+                Paytm
+              </a>
+
+              <a class="app-btn" id="btn-bhim" href="#" onclick="openApp(event,'bhim')">
+                <span class="app-icon icon-bhim">
+                  <img src="../assets/bhim-logo.jpg" alt="BHIM UPI" />
+                </span>
+                BHIM UPI
+              </a>
+            </div>
+          </div>
+
+          <!-- Other UPI app (mobile only) -->
+          <div class="mobile-only">
+            <div class="divider" style="margin-bottom:0.75rem;">Or use another app</div>
+            <a class="other-btn" id="btn-other" href="#">
+              Other UPI App
+            </a>
+            <p style="margin-top:0.6rem; font-size:0.72rem; color:var(--ink2); text-align:center; line-height:1.5;">
+              Opens your phone's app chooser
+            </p>
+          </div>
+
+          <!-- QR Code -->
+          <div class="qr-section">
+            <div class="divider" style="margin-bottom:0.25rem;">Or scan QR</div>
+            <div class="qr-wrap">
+              <div id="qr-canvas"></div>
+            </div>
+            <p class="qr-note">Open any UPI app → Scan QR → Confirm ₹<span class="ref-amount">—</span></p>
+          </div>
+
+          <!-- Footer note -->
+          <p class="pay-footer">Payments processed directly via UPI · No card data stored</p>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      /* ── Config ── */
+      const UPI_ID   = "seereyaana11@ybl";
+      const UPI_NAME = "Seere Yaana";
+
+      /* ── App definitions ── */
+      const APPS = {
+        phonepe: {
+          android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}#Intent;scheme=upi;package=com.phonepe.app;end`,
+          ios:     `phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR`,
+        },
+        gpay: {
+          android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end`,
+          ios:     `tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR`,
+        },
+        paytm: {
+          android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}#Intent;scheme=upi;package=net.one97.paytm;end`,
+          ios:     `paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR`,
+        },
+        bhim: {
+          android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}#Intent;scheme=upi;package=in.org.npci.upiapp;end`,
+          ios:     `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=AMOUNT&cu=INR`,
+        },
+      };
+
+      /* ── State ── */
+      let currentAmount = null;
+
+      /* ── Platform detection ── */
+      function isAndroid() { return /android/i.test(navigator.userAgent); }
+      function isIOS()     { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+      function isMobile()  { return isAndroid() || isIOS(); }
+
+      /* ── Build UPI link for amount ── */
+      function buildUPILink(amount) {
+        return `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent("Payment to Seere Yaana")}`;
+      }
+
+      function buildAppLink(app, amount) {
+        const platform = isAndroid() ? "android" : "ios";
+        return APPS[app][platform].replace("AMOUNT", encodeURIComponent(amount));
+      }
+
+      /* ── Open app button handler ── */
+      function openApp(event, app) {
+        event.preventDefault();
+        if (!currentAmount) return;
+        const url = buildAppLink(app, currentAmount);
+        window.location.href = url;
+      }
+
+      /* ── Generate QR ── */
+      function generateQR(amount) {
+        try {
+          var qr = qrcode(0, 'M');
+          qr.addData(buildUPILink(amount));
+          qr.make();
+          var container = document.getElementById('qr-canvas');
+          container.innerHTML = qr.createImgTag(5, 2, 'UPI payment QR code');
+        } catch (e) {
+          console.error('QR error:', e);
+        }
+      }
+
+      /* ── Initialise payment section ── */
+      function initPayment(amount) {
+        currentAmount = amount;
+
+        // Update displays
+        document.getElementById("amount-display").textContent = Number(amount).toLocaleString("en-IN");
+        document.querySelectorAll(".ref-amount").forEach(el => {
+          el.textContent = Number(amount).toLocaleString("en-IN");
+        });
+
+        // Set Other button href (generic UPI chooser)
+        document.getElementById("btn-other").href = buildUPILink(amount);
+
+        // Show payment section
+        document.getElementById("amount-form-section").style.display = "none";
+        document.getElementById("payment-section").style.display    = "block";
+
+        // Generate QR
+        generateQR(amount);
+      }
+
+      /* ── Amount form submit ── */
+      function applyAmount() {
+        const input = document.getElementById("amount-input");
+        const val   = parseFloat(input.value);
+        if (!val || val <= 0) {
+          input.focus();
+          input.style.borderColor = "var(--wine)";
+          setTimeout(() => { input.style.borderColor = ""; }, 1500);
+          return;
+        }
+        initPayment(val.toFixed(2));
+      }
+      document.addEventListener("DOMContentLoaded", () => {
+        document.getElementById("amount-input")
+          .addEventListener("keydown", e => { if (e.key === "Enter") applyAmount(); });
+      });
+
+      /* ── Boot: parse URL params ── */
+      (function boot() {
+        const params = new URLSearchParams(window.location.search);
+        const amount = parseFloat(params.get("amount"));
+
+        if (amount && amount > 0) {
+          initPayment(amount.toFixed(2));
+        } else {
+          document.getElementById("amount-form-section").style.display = "block";
+        }
+      })();
+    </script>
+  </body>
+</html>
