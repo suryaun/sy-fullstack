@@ -417,11 +417,9 @@
     <script>
       /* ── Config ── */
       const UPI_NAME = "Seere Yaana";
-      const BANK_UPI = {
-        hdfc: "seereyaana11@ybl",
-        sbi:  "seereyaana@ybl",
-      };
-      let UPI_ID = BANK_UPI.hdfc; // resolved from ?bank= param at boot
+      // HDFC SmartHub Vyapar merchant (P2M) VPA — verified merchant, so web-initiated
+      // UPI deep links are not blocked the way personal (P2P) VPAs are.
+      const UPI_ID = "seereyaana.36821938@hdfcbank";
 
       /* ── State ── */
       let currentAmount = null;
@@ -527,8 +525,6 @@
         const params = new URLSearchParams(window.location.search);
         const amount = parseFloat(params.get("amount"));
         const note   = params.get("note") || '';
-        const bank   = params.get("bank") || 'hdfc';
-        UPI_ID = BANK_UPI[bank] || BANK_UPI.hdfc;
 
         if (amount && amount > 0) {
           initPayment(amount.toFixed(2), note);
