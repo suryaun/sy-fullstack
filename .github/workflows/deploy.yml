@@ -1,0 +1,124 @@
+name: Deploy to Cloud Run
+
+# ============================================================================
+# DORMANT BY DEFAULT — this workflow does nothing until you enable it.
+#
+# Every job is gated on the repository variable DEPLOY_ENABLED == 'true'.
+# Until you set that variable, runs are skipped (green, no-op). This lets the
+# file live in the repo safely while you are still testing manually.
+#
+# ---------------------------------------------------------------------------
+# HOW TO ENABLE (after Phases 1–5 of docs/DEPLOYMENT_GCP_CLOUDRUN_NEON.md):
+#
+# 1. Set up Workload Identity Federation (no long-lived keys):
+#      https://github.com/google-github-actions/auth#preferred-direct-workload-identity-federation
+#
+# 2. In GitHub → Settings → Secrets and variables → Actions, add:
+#    Variables:
+#      DEPLOY_ENABLED            = true
+#      GCP_PROJECT_ID            = seere-yaana-prod
+#      GCP_REGION               = asia-south1
+#      GCP_WIF_PROVIDER         = projects/NUM/locations/global/workloadIdentityPools/POOL/providers/PROVIDER
+#      GCP_DEPLOY_SA            = deployer@seere-yaana-prod.iam.gserviceaccount.com
+#      AR_REPO                  = seere-yaana          # Artifact Registry repo
+#    (Web public build args — non-secret:)
+#      WEB_NEXT_PUBLIC_API_URL  = https://api.yourdomain.com
+#      WEB_API_INTERNAL_URL     = https://seere-yaana-api-xxxx.a.run.app
+#      WEB_AUTH_URL             = https://www.yourdomain.com
+#      WEB_NEXT_PUBLIC_RZP_KEY  = rzp_live_xxx
+#    Secrets (build-time for the web image):
+#      WEB_AUTH_SECRET, WEB_GOOGLE_CLIENT_ID, WEB_GOOGLE_CLIENT_SECRET,
+#      WEB_FACEBOOK_CLIENT_ID, WEB_FACEBOOK_CLIENT_SECRET,
+#      WEB_AUTH_APPLE_ID, WEB_AUTH_APPLE_SECRET
+#
+# 3. Runtime secrets (DATABASE_URL, RAZORPAY_*, IMAGEKIT_*, etc.) are read by
+#    Cloud Run from Secret Manager (see Phase 4) — NOT from GitHub.
+#
+# Branch model:
+#   push to `staging` → deploys *-test services    (set env=test vars accordingly)
+#   push to `main`    → deploys production services
+# ============================================================================
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build images & deploy
+    runs-on: ubuntu-latest
+    # Gate: skipped entirely until you create the DEPLOY_ENABLED variable.
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    permissions:
+      contents: read
+      id-token: write          # required for Workload Identity Federation
+    env:
+      PROJECT: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      AR: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.AR_REPO }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # ---------------- API ----------------
+      - name: Build & push API image
+        run: |
+          IMAGE="${AR}/api:${GITHUB_SHA::8}"
+          docker build --platform linux/amd64 -t "$IMAGE" apps/api
+          docker push "$IMAGE"
+          echo "API_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy API to Cloud Run
+        run: |
+          gcloud run deploy seere-yaana-api \
+            --image="${API_IMAGE}" \
+            --region="${REGION}" --platform=managed --allow-unauthenticated \
+            --port=4000 --cpu=1 --memory=512Mi \
+            --min-instances=0 --max-instances=4 --concurrency=80 \
+            --set-secrets="DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,IMAGEKIT_PUBLIC_KEY=IMAGEKIT_PUBLIC_KEY:latest,IMAGEKIT_PRIVATE_KEY=IMAGEKIT_PRIVATE_KEY:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET:latest,DELHIVERY_API_TOKEN=DELHIVERY_API_TOKEN:latest"
+
+      # ---------------- WEB ----------------
+      # NEXT_PUBLIC_* and auth values are baked at build time (see web Dockerfile).
+      - name: Build & push Web image
+        run: |
+          IMAGE="${AR}/web:${GITHUB_SHA::8}"
+          docker build --platform linux/amd64 -t "$IMAGE" apps/web \
+            --build-arg AUTH_URL="${{ vars.WEB_AUTH_URL }}" \
+            --build-arg AUTH_SECRET="${{ secrets.WEB_AUTH_SECRET }}" \
+            --build-arg NEXT_PUBLIC_API_URL="${{ vars.WEB_NEXT_PUBLIC_API_URL }}" \
+            --build-arg API_INTERNAL_URL="${{ vars.WEB_API_INTERNAL_URL }}" \
+            --build-arg GOOGLE_CLIENT_ID="${{ secrets.WEB_GOOGLE_CLIENT_ID }}" \
+            --build-arg GOOGLE_CLIENT_SECRET="${{ secrets.WEB_GOOGLE_CLIENT_SECRET }}" \
+            --build-arg FACEBOOK_CLIENT_ID="${{ secrets.WEB_FACEBOOK_CLIENT_ID }}" \
+            --build-arg FACEBOOK_CLIENT_SECRET="${{ secrets.WEB_FACEBOOK_CLIENT_SECRET }}" \
+            --build-arg AUTH_APPLE_ID="${{ secrets.WEB_AUTH_APPLE_ID }}" \
+            --build-arg AUTH_APPLE_SECRET="${{ secrets.WEB_AUTH_APPLE_SECRET }}"
+          docker push "$IMAGE"
+          echo "WEB_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy Web to Cloud Run
+        run: |
+          gcloud run deploy seere-yaana-web \
+            --image="${WEB_IMAGE}" \
+            --region="${REGION}" --platform=managed --allow-unauthenticated \
+            --port=3000 --cpu=1 --memory=512Mi \
+            --min-instances=0 --max-instances=4 --concurrency=80 \
+            --set-env-vars="NODE_ENV=production,NEXT_PUBLIC_API_URL=${{ vars.WEB_NEXT_PUBLIC_API_URL }},API_INTERNAL_URL=${{ vars.WEB_API_INTERNAL_URL }},ADMIN_API_INTERNAL_URL=${{ vars.WEB_API_INTERNAL_URL }},AUTH_URL=${{ vars.WEB_AUTH_URL }},NEXT_PUBLIC_RAZORPAY_KEY_ID=${{ vars.WEB_NEXT_PUBLIC_RZP_KEY }}" \
+            --set-secrets="AUTH_SECRET=AUTH_SECRET:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET:latest"

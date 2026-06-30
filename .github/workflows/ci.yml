@@ -1,0 +1,51 @@
+name: CI
+
+# Active immediately — no cloud setup required.
+# Runs on every push and pull request to validate that both apps build and type-check.
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & type-check (web + api)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      # npm workspaces: root lockfile installs both apps/web and apps/api.
+      - name: Install dependencies
+        run: npm ci
+
+      # The API imports the generated Prisma client; generate it before tsc.
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace @seere-yaana/api
+
+      # api build = `tsc`, web build = `next build` (Next also type-checks).
+      - name: Build API
+        run: npm run build --workspace @seere-yaana/api
+
+      - name: Build Web
+        run: npm run build --workspace @seere-yaana/web
+        env:
+          # Build-time placeholders so `next build` doesn't fail on missing public envs.
+          # Real values are injected by the deploy workflow / Cloud Run.
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_RAZORPAY_KEY_ID: rzp_test_placeholder
+          AUTH_SECRET: ci-placeholder-secret
+          AUTH_URL: http://localhost:3000
