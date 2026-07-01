@@ -398,6 +398,10 @@
           <!-- App buttons (mobile only) -->
           <div class="mobile-only">
             <div class="divider" style="margin-bottom:1rem;">Pay via</div>
+            <p style="margin:-0.5rem 0 0.85rem; font-size:0.72rem; color:var(--ink2); text-align:center; line-height:1.5;">
+              Enter <strong>₹<span class="ref-amount">—</span></strong> yourself when your UPI app opens.
+              For an auto-filled amount, scan the QR below instead.
+            </p>
             <div class="apps-grid">
               <a class="app-btn" id="btn-phonepe" href="#" onclick="openApp(event,'phonepe')">
                 <span class="app-icon icon-phonepe">
@@ -436,7 +440,7 @@
               Other UPI App
             </a>
             <p style="margin-top:0.6rem; font-size:0.72rem; color:var(--ink2); text-align:center; line-height:1.5;">
-              Opens your phone's app chooser
+              Opens your phone's app chooser — enter ₹<span class="ref-amount">—</span> manually
             </p>
           </div>
 
@@ -495,7 +499,11 @@
         return tn.slice(0, 40) || 'Payment';
       }
 
-      /* ── Build generic UPI link (QR + chooser + Android fallback) ── */
+      /* ── Build generic UPI link WITH amount ── QR ONLY.
+         Browser/app-tap intents that carry a pre-filled amount (am=) to a
+         merchant (P2M) VPA are blocked by NPCI policy (circular UPI-OC-76A,
+         Apr 2024) — confirmed by our own test: QR scan works, tapped link
+         does not. QR scans use a different, unaffected transaction mode. ── */
       function buildUPILink(amount, note) {
         return 'upi://pay?pa=' + UPI_ID +
                '&pn=' + enc(UPI_NAME) +
@@ -504,7 +512,17 @@
                '&tn=' + enc(cleanNote(note));
       }
 
-      /* ── Build app-specific link with graceful fallback ── */
+      /* ── Build a tap-safe UPI link WITHOUT a pre-filled amount ──
+         Used for the app buttons + "Other UPI App" link. The customer types
+         the amount inside their UPI app (shown prominently on this page). ── */
+      function buildTapLink(note) {
+        return 'upi://pay?pa=' + UPI_ID +
+               '&pn=' + enc(UPI_NAME) +
+               '&cu=INR' +
+               '&tn=' + enc(cleanNote(note));
+      }
+
+      /* ── Build app-specific link with graceful fallback (no amount) ── */
       function buildAppLink(app, amount, note) {
         var tn = cleanNote(note);
         if (isAndroid()) {
@@ -516,20 +534,19 @@
           }[app];
           // S.browser_fallback_url stops old Chrome from dead-ending with
           // ERR_UNKNOWN_URL_SCHEME when the specific app isn't installed.
-          var fallback = enc(buildUPILink(amount, note));
+          var fallback = enc(buildTapLink(note));
           return 'intent://pay?pa=' + UPI_ID +
                  '&pn=' + enc(UPI_NAME) +
-                 '&am=' + enc(amount) +
                  '&cu=INR&tn=' + enc(tn) +
                  '#Intent;scheme=upi;package=' + pkg +
                  ';S.browser_fallback_url=' + fallback + ';end';
         }
         // iOS — app-specific schemes
         var ios = {
-          phonepe: 'phonepe://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&am=' + amount + '&cu=INR&tn=' + enc(tn),
-          gpay:    'tez://upi/pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&am=' + amount + '&cu=INR&tn=' + enc(tn),
-          paytm:   'paytmmp://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&am=' + amount + '&cu=INR&tn=' + enc(tn),
-          bhim:    'upi://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&am=' + amount + '&cu=INR&tn=' + enc(tn)
+          phonepe: 'phonepe://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&cu=INR&tn=' + enc(tn),
+          gpay:    'tez://upi/pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&cu=INR&tn=' + enc(tn),
+          paytm:   'paytmmp://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&cu=INR&tn=' + enc(tn),
+          bhim:    'upi://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&cu=INR&tn=' + enc(tn)
         };
         return ios[app];
       }
@@ -636,10 +653,10 @@
         var refs = document.querySelectorAll('.ref-amount');
         for (var i = 0; i < refs.length; i++) refs[i].textContent = formatAmount(amount);
 
-        // Generic UPI chooser button
+        // Generic UPI chooser button — no pre-filled amount (see buildTapLink).
         var other = document.getElementById('btn-other');
         if (other) {
-          other.setAttribute('href', buildUPILink(amount, currentNote));
+          other.setAttribute('href', buildTapLink(currentNote));
         }
 
         document.getElementById('payment-section').style.display = 'block';
