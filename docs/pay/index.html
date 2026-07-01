@@ -568,20 +568,23 @@
         if (event && event.preventDefault) event.preventDefault();
         if (!currentAmount) return false;
 
-        // Deep links can't escape in-app browsers — guide the user out instead.
-        if (isInAppBrowser()) { showInAppNotice(); return false; }
-
         var url = buildAppLink(app, currentAmount, currentNote);
 
-        if (isIOS()) {
-          // iOS has no app chooser / no reliable fallback: if the app scheme
-          // doesn't take over, point the user at the QR code.
-          var hinted = false;
-          var t = setTimeout(function () { if (!hinted) flashQRHint(); }, 1500);
-          var cancel = function () { hinted = true; clearTimeout(t); };
-          window.addEventListener('pagehide', cancel);
-          window.addEventListener('blur', cancel);
-        }
+        // Attempt the hand-off first — Instagram's in-app browser (and most
+        // others) CAN launch a UPI app via the deep link. Only if the page is
+        // still in the foreground ~1.5s later (app didn't open) do we surface
+        // the fallback: "open in browser" for in-app browsers, else the QR.
+        var left = false;
+        var onLeave = function () { left = true; };
+        window.addEventListener('pagehide', onLeave);
+        window.addEventListener('blur', onLeave);
+        document.addEventListener('visibilitychange', onLeave);
+
+        setTimeout(function () {
+          if (left || document.hidden) return;
+          if (isInAppBrowser()) showInAppNotice();
+          else flashQRHint();
+        }, 1500);
 
         window.location.href = url;
         return false;
@@ -637,15 +640,9 @@
         var other = document.getElementById('btn-other');
         if (other) {
           other.setAttribute('href', buildUPILink(amount, currentNote));
-          other.addEventListener('click', function (e) {
-            if (isInAppBrowser()) { if (e && e.preventDefault) e.preventDefault(); showInAppNotice(); }
-          });
         }
 
         document.getElementById('payment-section').style.display = 'block';
-
-        // Warn immediately if we're stuck inside an in-app browser.
-        if (isMobile() && isInAppBrowser()) showInAppNotice();
 
         generateQR(amount, currentNote);
       }
