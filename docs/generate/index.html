@@ -32,6 +32,7 @@
         background: var(--bg);
         color: var(--ink);
         -webkit-font-smoothing: antialiased;
+        min-height: 100vh;
         min-height: 100dvh;
         display: flex;
         flex-direction: column;
@@ -286,47 +287,79 @@
     </main>
 
     <script>
-      const BASE_URL = window.location.origin + '/pay';
+      // Trailing slash avoids an extra redirect that some in-app browsers drop.
+      // location.origin is missing on very old browsers — fall back manually.
+      var ORIGIN = window.location.origin ||
+        (window.location.protocol + '//' + window.location.host);
+      var BASE_URL = ORIGIN + '/pay/';
 
       function buildLink() {
-        const amount = parseFloat(document.getElementById('amount-input').value);
+        var amount = parseFloat(document.getElementById('amount-input').value);
         if (!amount || amount <= 0) return null;
-        const note = document.getElementById('note-input').value.trim();
-        const url = new URL(BASE_URL);
-        url.searchParams.set('amount', amount.toFixed(2));
-        if (note) url.searchParams.set('note', note);
-        return url.toString();
+        var note = document.getElementById('note-input').value
+          .replace(/[^\w \-.]/g, ' ').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
+        var link = BASE_URL + '?amount=' + encodeURIComponent(amount.toFixed(2));
+        if (note) link += '&note=' + encodeURIComponent(note);
+        return link;
       }
 
       function onInput() {
-        const link = buildLink();
-        const copyBtn = document.getElementById('btn-copy');
-        const openBtn = document.getElementById('btn-open');
-        const preview = document.getElementById('url-preview');
-        const previewText = document.getElementById('url-preview-text');
+        var link = buildLink();
+        var copyBtn = document.getElementById('btn-copy');
+        var openBtn = document.getElementById('btn-open');
+        var preview = document.getElementById('url-preview');
+        var previewText = document.getElementById('url-preview-text');
 
         if (link) {
           copyBtn.disabled = false;
-          openBtn.href = link;
+          openBtn.setAttribute('href', link);
           previewText.textContent = link;
-          preview.classList.add('visible');
+          preview.className = 'url-preview visible';
         } else {
           copyBtn.disabled = true;
-          openBtn.href = '#';
-          preview.classList.remove('visible');
+          openBtn.setAttribute('href', '#');
+          preview.className = 'url-preview';
         }
       }
 
+      function showCopied() {
+        var btn = document.getElementById('btn-copy');
+        var orig = btn.innerHTML;
+        btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Copied!';
+        btn.classList.add('copied');
+        setTimeout(function () { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2500);
+      }
+
+      // Legacy fallback for browsers / contexts without the async Clipboard API
+      // (old Android WebView, http, in-app browsers).
+      function legacyCopy(text) {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        ta.setSelectionRange(0, text.length);
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        return ok;
+      }
+
       function copyLink() {
-        const link = buildLink();
+        var link = buildLink();
         if (!link) return;
-        navigator.clipboard.writeText(link).then(() => {
-          const btn = document.getElementById('btn-copy');
-          const orig = btn.innerHTML;
-          btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M2 6l3 3 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> Copied!`;
-          btn.classList.add('copied');
-          setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2500);
-        });
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(link).then(showCopied, function () {
+            if (legacyCopy(link)) showCopied();
+            else window.prompt('Copy this payment link:', link);
+          });
+        } else if (legacyCopy(link)) {
+          showCopied();
+        } else {
+          window.prompt('Copy this payment link:', link);
+        }
       }
     </script>
   </body>

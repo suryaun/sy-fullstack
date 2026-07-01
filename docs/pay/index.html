@@ -37,6 +37,7 @@
         background: var(--bg);
         color: var(--ink);
         -webkit-font-smoothing: antialiased;
+        min-height: 100vh;
         min-height: 100dvh;
         display: flex;
         flex-direction: column;
@@ -277,6 +278,39 @@
         line-height: 1.6;
       }
 
+      /* ── in-app browser notice (WhatsApp / Instagram etc.) ── */
+      .inapp-notice {
+        text-align: center;
+        padding: 1rem 1.1rem;
+        margin-bottom: 1.5rem;
+        background: #fff6e5;
+        border: 1.5px solid var(--gold);
+        border-radius: 12px;
+        font-size: 0.82rem;
+        color: var(--ink);
+        line-height: 1.6;
+      }
+      .inapp-notice strong { color: var(--wine); }
+      .inapp-sub {
+        margin-top: 0.35rem;
+        font-size: 0.76rem;
+        color: var(--ink2);
+      }
+      .inapp-chrome {
+        display: inline-block;
+        margin-top: 0.85rem;
+        padding: 0.7rem 1.4rem;
+        border-radius: 10px;
+        background: var(--ink);
+        color: var(--bg);
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        text-decoration: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+
       /* ── missing-amount state ── */
       .amount-form { display: none; }
 
@@ -340,6 +374,13 @@
 
         <!-- Payment section (shown when amount is known) -->
         <div id="payment-section" style="display:none;">
+
+          <!-- In-app browser notice (WhatsApp / Instagram block UPI deep links) -->
+          <div id="inapp-notice" class="inapp-notice" style="display:none;">
+            <p><strong>Open in your browser to pay</strong></p>
+            <p class="inapp-sub">UPI apps can’t open inside WhatsApp or Instagram. Tap the <strong>⋮</strong> / <strong>•••</strong> menu above and choose “Open in browser”, then pay. Or simply scan the QR code below with any UPI app.</p>
+            <a id="inapp-chrome" class="inapp-chrome" href="#" style="display:none;">Open in Chrome</a>
+          </div>
 
           <!-- Amount display -->
           <div class="pay-hero">
@@ -416,58 +457,134 @@
 
     <script>
       /* ── Config ── */
-      const UPI_NAME = "Seere Yaana";
+      var UPI_NAME = "Seere Yaana";
       // HDFC SmartHub Vyapar merchant (P2M) VPA — verified merchant, so web-initiated
       // UPI deep links are not blocked the way personal (P2P) VPAs are.
-      const UPI_ID = "seereyaana.36821938@hdfcbank";
+      var UPI_ID = "seereyaana.36821938@hdfcbank";
 
       /* ── State ── */
-      let currentAmount = null;
-      let currentNote   = '';
+      var currentAmount = null;
+      var currentNote   = '';
+      var UA = (navigator.userAgent || navigator.vendor || '');
 
-      /* ── Platform detection ── */
-      function isAndroid() { return /android/i.test(navigator.userAgent); }
-      function isIOS()     { return /iphone|ipad|ipod/i.test(navigator.userAgent); }
-      function isMobile()  { return isAndroid() || isIOS(); }
+      /* ── Platform detection (defensive for old WebViews) ── */
+      function isAndroid() { return /android/i.test(UA); }
+      function isIOS() {
+        return /iphone|ipad|ipod/i.test(UA) ||
+          // iPadOS 13+ reports as Mac; detect via touch
+          (/Macintosh/.test(UA) && typeof document !== 'undefined' && 'ontouchend' in document);
+      }
+      function isMobile() { return isAndroid() || isIOS(); }
 
-      /* ── Build UPI link for amount ── */
+      /* ── In-app browser detection (WhatsApp / Instagram / FB / etc.) ──
+         These embedded browsers routinely block upi:// and intent:// deep
+         links — the #1 reason a shared link "won't open" or "payment failed". */
+      function isInAppBrowser() {
+        return /FBAN|FBAV|FB_IAB|Instagram|Line\/|Twitter|TwitterAndroid|Snapchat|WhatsApp|MicroMessenger|GSA|Pinterest/i.test(UA);
+      }
+
+      function enc(v) { return encodeURIComponent(v); }
+
+      /* ── Sanitise the note so older UPI apps don't reject the intent ──
+         (emojis / & / special chars break the deep link on some apps) ── */
+      function cleanNote(note) {
+        var tn = String(note || 'Payment to Seere Yaana')
+          .replace(/[^\w \-.]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .replace(/^\s+|\s+$/g, '');
+        return tn.slice(0, 40) || 'Payment';
+      }
+
+      /* ── Build generic UPI link (QR + chooser + Android fallback) ── */
       function buildUPILink(amount, note) {
-        const tn = note || 'Payment to Seere Yaana';
-        return `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR&tn=${encodeURIComponent(tn)}`;
+        return 'upi://pay?pa=' + UPI_ID +
+               '&pn=' + enc(UPI_NAME) +
+               '&am=' + amount +
+               '&cu=INR' +
+               '&tn=' + enc(cleanNote(note));
       }
 
+      /* ── Build app-specific link with graceful fallback ── */
       function buildAppLink(app, amount, note) {
-        const platform = isAndroid() ? "android" : "ios";
-        const tn = note || 'Payment to Seere Yaana';
-        const base = {
-          phonepe: {
-            android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(tn)}#Intent;scheme=upi;package=com.phonepe.app;end`,
-            ios:     `phonepe://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`,
-          },
-          gpay: {
-            android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(tn)}#Intent;scheme=upi;package=com.google.android.apps.nbu.paisa.user;end`,
-            ios:     `tez://upi/pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`,
-          },
-          paytm: {
-            android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(tn)}#Intent;scheme=upi;package=net.one97.paytm;end`,
-            ios:     `paytmmp://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`,
-          },
-          bhim: {
-            android: `intent://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${encodeURIComponent(amount)}&cu=INR&tn=${encodeURIComponent(tn)}#Intent;scheme=upi;package=in.org.npci.upiapp;end`,
-            ios:     `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent(UPI_NAME)}&am=${amount}&cu=INR`,
-          },
+        var tn = cleanNote(note);
+        if (isAndroid()) {
+          var pkg = {
+            phonepe: 'com.phonepe.app',
+            gpay:    'com.google.android.apps.nbu.paisa.user',
+            paytm:   'net.one97.paytm',
+            bhim:    'in.org.npci.upiapp'
+          }[app];
+          // S.browser_fallback_url stops old Chrome from dead-ending with
+          // ERR_UNKNOWN_URL_SCHEME when the specific app isn't installed.
+          var fallback = enc(buildUPILink(amount, note));
+          return 'intent://pay?pa=' + UPI_ID +
+                 '&pn=' + enc(UPI_NAME) +
+                 '&am=' + enc(amount) +
+                 '&cu=INR&tn=' + enc(tn) +
+                 '#Intent;scheme=upi;package=' + pkg +
+                 ';S.browser_fallback_url=' + fallback + ';end';
+        }
+        // iOS — app-specific schemes
+        var ios = {
+          phonepe: 'phonepe://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&am=' + amount + '&cu=INR&tn=' + enc(tn),
+          gpay:    'tez://upi/pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&am=' + amount + '&cu=INR&tn=' + enc(tn),
+          paytm:   'paytmmp://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&am=' + amount + '&cu=INR&tn=' + enc(tn),
+          bhim:    'upi://pay?pa=' + UPI_ID + '&pn=' + enc(UPI_NAME) + '&am=' + amount + '&cu=INR&tn=' + enc(tn)
         };
-        return base[app][platform];
+        return ios[app];
       }
 
-      /* ── Copy link from the entry form ── */
+      /* ── Reveal the in-app browser notice ── */
+      function showInAppNotice() {
+        var notice = document.getElementById('inapp-notice');
+        if (!notice) return;
+        notice.style.display = 'block';
+        // On Android we can offer a one-tap "Open in Chrome" via intent.
+        if (isAndroid()) {
+          var chrome = document.getElementById('inapp-chrome');
+          if (chrome) {
+            var bare = window.location.href.replace(/^https?:\/\//, '');
+            chrome.setAttribute(
+              'href',
+              'intent://' + bare + '#Intent;scheme=https;package=com.android.chrome;end'
+            );
+            chrome.style.display = 'inline-block';
+          }
+        }
+        try { notice.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+        catch (e) { notice.scrollIntoView(); }
+      }
+
+      /* ── Nudge the user toward the QR when an iOS deep link doesn't open ── */
+      function flashQRHint() {
+        var qr = document.querySelector('.qr-section');
+        if (!qr) return;
+        try { qr.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        catch (e) { qr.scrollIntoView(); }
+      }
 
       /* ── Open app button handler ── */
       function openApp(event, app) {
-        event.preventDefault();
-        if (!currentAmount) return;
-        const url = buildAppLink(app, currentAmount, currentNote);
+        if (event && event.preventDefault) event.preventDefault();
+        if (!currentAmount) return false;
+
+        // Deep links can't escape in-app browsers — guide the user out instead.
+        if (isInAppBrowser()) { showInAppNotice(); return false; }
+
+        var url = buildAppLink(app, currentAmount, currentNote);
+
+        if (isIOS()) {
+          // iOS has no app chooser / no reliable fallback: if the app scheme
+          // doesn't take over, point the user at the QR code.
+          var hinted = false;
+          var t = setTimeout(function () { if (!hinted) flashQRHint(); }, 1500);
+          var cancel = function () { hinted = true; clearTimeout(t); };
+          window.addEventListener('pagehide', cancel);
+          window.addEventListener('blur', cancel);
+        }
+
         window.location.href = url;
+        return false;
       }
 
       /* ── Generate QR ── */
@@ -479,7 +596,20 @@
           var container = document.getElementById('qr-canvas');
           container.innerHTML = qr.createImgTag(5, 2, 'UPI payment QR code');
         } catch (e) {
-          console.error('QR error:', e);
+          if (window.console) console.error('QR error:', e);
+        }
+      }
+
+      /* ── Format amount for display (locale-tolerant) ── */
+      function formatAmount(raw) {
+        var n = Number(raw);
+        if (!isFinite(n)) return String(raw);
+        try {
+          return n % 1 === 0
+            ? n.toLocaleString('en-IN')
+            : n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        } catch (e) {
+          return n % 1 === 0 ? String(n) : n.toFixed(2);
         }
       }
 
@@ -488,43 +618,50 @@
         currentAmount = amount;
         currentNote   = note || '';
 
-        // Update URL so the link is shareable
-        const url = new URL(window.location.href);
-        url.searchParams.set('amount', amount);
-        if (currentNote) url.searchParams.set('note', currentNote);
-        else url.searchParams.delete('note');
-        history.replaceState(null, '', url.toString());
+        // Update the address bar so the link stays shareable (non-essential).
+        try {
+          if (window.history && history.replaceState && typeof URL === 'function') {
+            var url = new URL(window.location.href);
+            url.searchParams.set('amount', amount);
+            if (currentNote) url.searchParams.set('note', currentNote);
+            else url.searchParams.delete('note');
+            history.replaceState(null, '', url.toString());
+          }
+        } catch (e) { /* older browser — skip, link still works */ }
 
-        // Update displays
-        function formatAmount(raw) {
-          const n = Number(raw);
-          return n % 1 === 0
-            ? n.toLocaleString("en-IN")
-            : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        document.getElementById('amount-display').textContent = formatAmount(amount);
+        var refs = document.querySelectorAll('.ref-amount');
+        for (var i = 0; i < refs.length; i++) refs[i].textContent = formatAmount(amount);
+
+        // Generic UPI chooser button
+        var other = document.getElementById('btn-other');
+        if (other) {
+          other.setAttribute('href', buildUPILink(amount, currentNote));
+          other.addEventListener('click', function (e) {
+            if (isInAppBrowser()) { if (e && e.preventDefault) e.preventDefault(); showInAppNotice(); }
+          });
         }
 
-        document.getElementById("amount-display").textContent = formatAmount(amount);
-        document.querySelectorAll(".ref-amount").forEach(el => {
-          el.textContent = formatAmount(amount);
-        });
+        document.getElementById('payment-section').style.display = 'block';
 
-        // Set Other button href (generic UPI chooser)
-        document.getElementById("btn-other").href = buildUPILink(amount, currentNote);
+        // Warn immediately if we're stuck inside an in-app browser.
+        if (isMobile() && isInAppBrowser()) showInAppNotice();
 
-        // Show payment section
-        document.getElementById("payment-section").style.display    = "block";
-
-        // Generate QR
         generateQR(amount, currentNote);
       }
 
-      /* ── Amount form submit ── */
+      /* ── Read a query param without relying on URLSearchParams ── */
+      function getParam(name) {
+        var m = new RegExp('[?&]' + name + '=([^&]*)').exec(window.location.search || '');
+        if (!m) return '';
+        try { return decodeURIComponent(m[1].replace(/\+/g, ' ')); }
+        catch (e) { return m[1]; }
+      }
 
       /* ── Boot: parse URL params ── */
       (function boot() {
-        const params = new URLSearchParams(window.location.search);
-        const amount = parseFloat(params.get("amount"));
-        const note   = params.get("note") || '';
+        var amount = parseFloat(getParam('amount'));
+        var note   = getParam('note');
 
         if (amount && amount > 0) {
           initPayment(amount.toFixed(2), note);
