@@ -12,7 +12,9 @@ import webhookRoutes from "./routes/webhooks.js";
 const app = express();
 const port = Number(process.env.PORT ?? 4000);
 
-app.use(cors());
+// app.use(cors());
+const allowed = (process.env.CORS_ORIGINS ?? "").split(",").filter(Boolean);
+app.use(cors({ origin: allowed.length ? allowed : true, credentials: true }));
 app.use(morgan("dev"));
 app.use("/api/webhooks/razorpay", express.raw({ type: "application/json" }));
 app.use(express.json({ limit: "1mb" }));

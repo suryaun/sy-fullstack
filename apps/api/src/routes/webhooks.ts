@@ -1,6 +1,9 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { Router } from "express";
-import { markOrderAsPaidByRazorpayOrderId } from "../lib/orderPayment.js";
+import {
+  markOrderAsFailedByRazorpayOrderId,
+  markOrderAsPaidByRazorpayOrderId,
+} from "../lib/orderPayment.js";
 
 const router = Router();
 
@@ -41,6 +44,17 @@ router.post("/razorpay", async (req, res) => {
       await markOrderAsPaidByRazorpayOrderId({
         razorpayOrderId,
         razorpayPaymentId
+      });
+    }
+  } else if (event.event === "payment.failed") {
+    const razorpayOrderId = event.payload?.payment?.entity?.order_id;
+    const razorpayPaymentId = event.payload?.payment?.entity?.id;
+
+    if (razorpayOrderId) {
+      await markOrderAsFailedByRazorpayOrderId({
+        razorpayOrderId,
+        razorpayPaymentId,
+        status: "FAILED",
       });
     }
   }

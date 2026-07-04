@@ -1,5 +1,9 @@
 import { createHash, randomInt } from "crypto";
 import { Router } from "express";
+import {
+  buildShipmentTrackingUrl,
+  checkDeliveryPostalCodeServiceability,
+} from "../lib/courier.js";
 import { prisma } from "../lib/prisma.js";
 
 const router = Router();
@@ -68,6 +72,14 @@ function mapOrderForResponse(order: {
   notes: unknown;
   createdAt: Date;
   updatedAt: Date;
+  shipments?: Array<{
+    provider: string;
+    status: string;
+    providerShipmentId: string | null;
+    providerWaybill: string | null;
+    bookedAt: Date | null;
+    failureMessage: string | null;
+  }>;
   items: Array<{
     id: string;
     productId: string;
@@ -88,12 +100,40 @@ function mapOrderForResponse(order: {
 }) {
   const notes = asRecord(order.notes);
   const deliveryAddress = asRecord(notes?.deliveryAddress);
-  const shipment = asRecord(notes?.shipment);
+  const shipmentRecord = order.shipments?.[0] ?? null;
+  const shipment = shipmentRecord
+    ? {
+        courier: shipmentRecord.provider,
+        trackingNumber:
+          shipmentRecord.providerWaybill ?? shipmentRecord.providerShipmentId ?? null,
+        trackingUrl: buildShipmentTrackingUrl({
+          provider: shipmentRecord.provider,
+          trackingNumber:
+            shipmentRecord.providerWaybill ?? shipmentRecord.providerShipmentId ?? null,
+        }),
+        expectedDeliveryAt: shipmentRecord.bookedAt?.toISOString() ?? null,
+      }
+    : asRecord(notes?.shipment);
+
+  const trackingAvailable = shipmentRecord?.status === "BOOKED" || (shipment?.trackingUrl ? true : false);
+  const overallStatus = (() => {
+    if (order.status === "CANCELLED") return "CANCELLED";
+    if (order.status === "FAILED") return "PAYMENT_FAILED";
+    if (order.status === "PENDING") return "AWAITING_PAYMENT";
+    // For paid orders, check fulfillment
+    const fulfillment = asFulfillmentStatus(notes, order.status)?.toUpperCase() ?? "";
+    if (fulfillment === "DELIVERED" || fulfillment === "FULFILLED") return "DELIVERED";
+    if (fulfillment === "IN_TRANSIT" || fulfillment === "OUT_FOR_DELIVERY") return "IN_TRANSIT";
+    if (fulfillment === "CANCELLED") return "CANCELLED";
+    return "PROCESSING"; // Default for PAID but not yet shipped
+  })();
 
   return {
     id: order.id,
     paymentStatus: order.status,
     fulfillmentStatus: asFulfillmentStatus(notes, order.status),
+    overallStatus,
+    trackingAvailable,
     amountInPaise: order.amountInPaise,
     currency: order.currency,
     customerName: order.customerName,
@@ -311,6 +351,40 @@ router.get("/addresses", async (req, res) => {
   });
 });
 
+router.get("/addresses/serviceability", async (req, res) => {
+  const userId = asTrimmedText(req.query?.userId);
+  const postalCode = asTrimmedText(req.query?.postalCode);
+
+  if (!userId) {
+    return res.status(400).json({ message: "userId is required" });
+  }
+
+  if (!postalCode) {
+    return res.status(400).json({ message: "postalCode is required" });
+  }
+
+  const user = await prisma.customerUser.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+
+  if (!user) {
+    return res.status(404).json({ message: "Customer not found" });
+  }
+
+  try {
+    const result = await checkDeliveryPostalCodeServiceability(postalCode);
+    return res.json(result);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("[serviceability error]", errorMessage, error);
+    return res.status(502).json({
+      message: errorMessage,
+      error: "Courier serviceability check failed",
+    });
+  }
+});
+
 router.post("/addresses", async (req, res) => {
   const userId = asTrimmedText(req.body?.userId);
   const fullName = asTrimmedText(req.body?.fullName);
@@ -525,6 +599,10 @@ router.get("/orders", async (req, res) => {
     },
     orderBy: { createdAt: "desc" },
     include: {
+      shipments: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
       items: {
         include: {
           product: {

@@ -41,6 +41,17 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum ShipmentProvider {
+  DELHIVERY
+}
+
+enum ShipmentStatus {
+  PENDING
+  BOOKED
+  FAILED
+  CANCELLED
+}
+
 enum BackInStockStatus {
   ACTIVE
   NOTIFIED
@@ -68,7 +79,17 @@ model Product {
   stockStatus     StockStatus @default(IN_STOCK)
   imageUrl        String
   imagePublicId   String?
+  instagramReelUrl String?
   hidden          Boolean     @default(false)
+
+  // Delivery / shipping defaults
+  packageType     String      @default("Plastic cover/Flyer")
+  packageLengthCm Int         @default(40)
+  packageWidthCm  Int         @default(30)
+  packageHeightCm Int         @default(6)
+  weightGrams     Int         @default(800)
+  sourcePincode   String      @default("560064")
+
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
@@ -205,9 +226,36 @@ model Order {
   updatedAt               DateTime    @updatedAt
 
   items                   OrderItem[]
+  shipments               OrderShipment[]
 
   @@index([status])
   @@index([invoiceNumber])
+}
+
+model OrderShipment {
+  id                    String           @id @default(cuid())
+  orderId               String
+  provider              ShipmentProvider
+  status                ShipmentStatus   @default(PENDING)
+  sourcePincode         String?
+  providerShipmentId    String?
+  providerWaybill       String?
+  providerReference     String?
+  serviceablePostalCode Boolean?
+  requestPayload        Json?
+  responsePayload       Json?
+  failureMessage        String?
+  bookedAt              DateTime?
+  cancelledAt           DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  order                  Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, status])
+  @@index([provider, status])
+  @@index([providerShipmentId])
+  @@index([providerWaybill])
 }
 
 model OrderItem {

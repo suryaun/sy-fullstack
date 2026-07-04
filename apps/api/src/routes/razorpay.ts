@@ -1,6 +1,11 @@
 import { createHmac } from "crypto";
 import { Router } from "express";
-import { markOrderAsPaidByRazorpayOrderId } from "../lib/orderPayment.js";
+import type { Orders } from "razorpay/dist/types/orders.js";
+import { assertDeliveryPostalCodeServiceable } from "../lib/courier.js";
+import {
+  markOrderAsFailedByRazorpayOrderId,
+  markOrderAsPaidByRazorpayOrderId,
+} from "../lib/orderPayment.js";
 import { prisma } from "../lib/prisma.js";
 import { razorpay } from "../lib/razorpay.js";
 
@@ -132,6 +137,16 @@ router.post("/order", async (req, res) => {
       });
       if (!selectedAddress) {
         return res.status(400).json({ message: "Selected delivery address is invalid" });
+      }
+
+      try {
+        await assertDeliveryPostalCodeServiceable(selectedAddress.postalCode);
+      } catch (error) {
+        return res.status(400).json({
+          message: error instanceof Error
+            ? error.message
+            : "Delivery is unavailable for the selected postal code",
+        });
       }
     }
 
@@ -406,13 +421,22 @@ router.post("/verify", async (req, res) => {
 // other customers can purchase immediately instead of waiting 10 minutes.
 // ─────────────────────────────────────────────────────────────────────────────
 router.post("/release", async (req, res) => {
-  const { razorpayOrderId, customerUserId } = req.body as {
+  const { razorpayOrderId, customerUserId, releaseReason } = req.body as {
     razorpayOrderId?: string;
     customerUserId?: string;
+    releaseReason?: "PAYMENT_FAILED" | "USER_DISMISSED" | "VERIFY_FAILED" | "OTHER";
   };
 
   if (!razorpayOrderId && !customerUserId) {
     return res.status(400).json({ message: "razorpayOrderId or customerUserId is required" });
+  }
+
+  if (razorpayOrderId) {
+    const shouldCancel = releaseReason === "USER_DISMISSED";
+    await markOrderAsFailedByRazorpayOrderId({
+      razorpayOrderId,
+      status: shouldCancel ? "CANCELLED" : "FAILED",
+    });
   }
 
   const where = razorpayOrderId
