@@ -57,7 +57,7 @@
 | `DELHIVERY_API_BASE_URL` | `https://track.delhivery.com` | **`https://staging-express.delhivery.com`** |
 | `DELHIVERY_API_TOKEN` | prod token | **staging token** |
 | `MOBILE_OTP_BYPASS` | `false` | **`true`** (skip real OTP while testing) |
-| `AUTH_URL` / `NEXT_PUBLIC_API_URL` | real domain | **Cloud Run `*.run.app` URLs** (no domain needed) |
+| `AUTH_URL` / `NEXT_PUBLIC_API_URL` | real domain | **`https://test.seereyaana.com`** / **`https://api.test.seereyaana.com`** |
 | Neon | prod project | **separate `seere-yaana-test` project or DB branch** |
 
 Razorpay test cards (e.g. `4111 1111 1111 1111`, any future expiry/CVV) let you complete
@@ -85,12 +85,28 @@ gcloud run deploy seere-yaana-api-test  --image=...:test --region=asia-south1 \
 
 gcloud run deploy seere-yaana-web-test  --image=...:test --region=asia-south1 \
   --allow-unauthenticated --port=3000 --min-instances=0 \
-  --set-env-vars="AUTH_URL=https://seere-yaana-web-test-xxxx.a.run.app,NEXT_PUBLIC_API_URL=https://seere-yaana-api-test-xxxx.a.run.app,..."
+  --set-env-vars="AUTH_URL=https://test.seereyaana.com,NEXT_PUBLIC_API_URL=https://api.test.seereyaana.com,..."
 ```
-- **Skip Phase 7 (domain) entirely while testing** — use the free `*.run.app` HTTPS URLs.
-- For OAuth in test, add the `*.run.app` callback URLs to Google/Facebook/Apple consoles,
-  **or** rely on `MOBILE_OTP_BYPASS=true` and test mobile login without OAuth.
-- For Razorpay test webhooks, point the webhook at the **api-test** `*.run.app` URL.
+
+Map the test domains to the services (web → `test.seereyaana.com`, api → `api.test.seereyaana.com`):
+```bash
+gcloud beta run domain-mappings create --service=seere-yaana-web-test \
+  --domain=test.seereyaana.com --region=asia-south1
+gcloud beta run domain-mappings create --service=seere-yaana-api-test \
+  --domain=api.test.seereyaana.com --region=asia-south1
+```
+Then add these records at **GoDaddy** (seereyaana.com → DNS):
+| Type | Name | Value |
+|------|------|-------|
+| CNAME | `test` | `ghs.googlehosted.com` |
+| CNAME | `api.test` | `ghs.googlehosted.com` |
+(Use the exact records `gcloud ... domain-mappings describe` prints if Google returns A/AAAA instead.) TLS is issued free & automatically once DNS resolves.
+
+- **`NEXT_PUBLIC_API_URL` is baked at web build time** — rebuild the web image with
+  `--build-arg NEXT_PUBLIC_API_URL=https://api.test.seereyaana.com` (and `AUTH_URL=https://test.seereyaana.com`).
+- For OAuth in test, add `https://test.seereyaana.com/api/auth/callback/{provider}` to the
+  Google/Facebook/Apple consoles, **or** rely on `MOBILE_OTP_BYPASS=true` and test mobile login without OAuth.
+- For Razorpay test webhooks, point the webhook at `https://api.test.seereyaana.com/...`.
 
 ### 0.4 Step (c): promote to production
 Once the test environment passes the Phase 11 checklist with test keys:
@@ -445,14 +461,133 @@ the API at 0.
 
 ---
 
-## Phase 10 — CI/CD (optional, do after first manual deploy works)
+## Phase 10 — CI/CD (now that manual deploy works)
 
-Automate with Cloud Build or GitHub Actions on push to `main`:
-- Build both images → push to Artifact Registry → `gcloud run deploy` both services.
-- Run `prisma migrate deploy` as a build step against Neon.
-- Use Workload Identity Federation (no long-lived keys) for GitHub Actions → GCP.
+This repo now includes two GitHub Actions workflows:
+- `.github/workflows/ci.yml`: build/type-check on `main`, `staging`, and PRs
+- `.github/workflows/deploy.yml`: deploy to Cloud Run from GitHub Actions
 
-(Provide this only once the manual path is proven.)
+### 10.1 Branch to environment mapping
+- Push to `test` → deploys the GitHub `test` environment
+- Push to `main` → deploys the GitHub `prod` environment
+- Manual run (`workflow_dispatch`) → lets you choose `test` or `prod`
+
+### 10.2 Configure GitHub Actions
+Create one repository variable:
+```text
+DEPLOY_ENABLED=true
+```
+
+Then create two GitHub environments: `test` and `prod`.
+
+In **each** environment, add these variables:
+```text
+GCP_PROJECT_ID
+GCP_REGION
+GCP_WIF_PROVIDER
+GCP_DEPLOY_SA
+AR_REPO
+API_SERVICE
+WEB_SERVICE
+API_RUNTIME_ENV_VARS
+API_RUNTIME_SECRETS
+WEB_NEXT_PUBLIC_BRAND_LOGO
+WEB_RUNTIME_ENV_VARS
+WEB_RUNTIME_SECRETS
+```
+
+Optional environment variables:
+```text
+WEB_API_INTERNAL_URL
+WEB_ADMIN_API_INTERNAL_URL
+```
+
+In **each** environment, add these GitHub secrets used at web image build/deploy time:
+```text
+WEB_AUTH_URL
+WEB_NEXT_PUBLIC_API_URL
+WEB_NEXT_PUBLIC_RZP_KEY
+WEB_AUTH_SECRET
+```
+
+### 10.3 Recommended values
+Example `test` environment values:
+```text
+GCP_PROJECT_ID=seere-yaana-prod
+GCP_REGION=asia-south1
+AR_REPO=seere-yaana
+API_SERVICE=seere-yaana-api-test
+WEB_SERVICE=seere-yaana-web-test
+WEB_NEXT_PUBLIC_BRAND_LOGO=https://ik.imagekit.io/your_id/logo.png
+API_RUNTIME_ENV_VARS=CORS_ORIGINS=https://test.seereyaana.com,IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/your_id,IMAGEKIT_FOLDER=/seere-yaana/products,COURIER_PROVIDER=DELHIVERY,DELHIVERY_USE_STAGING=true,DELHIVERY_API_BASE_URL=https://staging-express.delhivery.com,DELHIVERY_PICKUP_LOCATION_NAME=YourWarehouse,BUSINESS_NAME=Seere Yaana,BUSINESS_PINCODE=560001,MOBILE_OTP_BYPASS=true
+API_RUNTIME_SECRETS=DATABASE_URL=DATABASE_URL_TEST:latest,JWT_SECRET=JWT_SECRET_TEST:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID_TEST:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET_TEST:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET_TEST:latest,IMAGEKIT_PUBLIC_KEY=IMAGEKIT_PUBLIC_KEY:latest,IMAGEKIT_PRIVATE_KEY=IMAGEKIT_PRIVATE_KEY:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET_TEST:latest,DELHIVERY_API_TOKEN=DELHIVERY_API_TOKEN_TEST:latest
+WEB_RUNTIME_ENV_VARS=MOBILE_OTP_BYPASS=true
+WEB_RUNTIME_SECRETS=AUTH_SECRET=AUTH_SECRET_TEST:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET_TEST:latest,JWT_SECRET=JWT_SECRET_TEST:latest,ADMIN_MOBILE_NUMBERS=ADMIN_MOBILE_NUMBERS_TEST:latest
+```
+
+Example `test` environment secrets:
+```text
+WEB_AUTH_URL=https://test.seereyaana.com
+WEB_NEXT_PUBLIC_API_URL=https://api.test.seereyaana.com
+WEB_NEXT_PUBLIC_RZP_KEY=rzp_test_xxx
+WEB_AUTH_SECRET=<test auth secret>
+```
+
+Add OAuth provider credentials to GCP Secret Manager instead, and reference them from `WEB_RUNTIME_SECRETS`, for example:
+```text
+WEB_RUNTIME_SECRETS=AUTH_SECRET=AUTH_SECRET_TEST:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET_TEST:latest,JWT_SECRET=JWT_SECRET_TEST:latest,ADMIN_MOBILE_NUMBERS=ADMIN_MOBILE_NUMBERS_TEST:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID_TEST:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET_TEST:latest,FACEBOOK_CLIENT_ID=FACEBOOK_CLIENT_ID_TEST:latest,FACEBOOK_CLIENT_SECRET=FACEBOOK_CLIENT_SECRET_TEST:latest,AUTH_APPLE_ID=AUTH_APPLE_ID_TEST:latest,AUTH_APPLE_SECRET=AUTH_APPLE_SECRET_TEST:latest
+```
+
+Example `production` environment values:
+```text
+API_SERVICE=seere-yaana-api
+WEB_SERVICE=seere-yaana-web
+API_RUNTIME_ENV_VARS=CORS_ORIGINS=https://www.seereyaana.com,IMAGEKIT_URL_ENDPOINT=https://ik.imagekit.io/your_id,IMAGEKIT_FOLDER=/seere-yaana/products,COURIER_PROVIDER=DELHIVERY,DELHIVERY_USE_STAGING=false,DELHIVERY_API_BASE_URL=https://track.delhivery.com,DELHIVERY_PICKUP_LOCATION_NAME=YourWarehouse,BUSINESS_NAME=Seere Yaana,BUSINESS_PINCODE=560001,MOBILE_OTP_BYPASS=false
+API_RUNTIME_SECRETS=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,IMAGEKIT_PUBLIC_KEY=IMAGEKIT_PUBLIC_KEY:latest,IMAGEKIT_PRIVATE_KEY=IMAGEKIT_PRIVATE_KEY:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET:latest,DELHIVERY_API_TOKEN=DELHIVERY_API_TOKEN:latest
+WEB_RUNTIME_ENV_VARS=MOBILE_OTP_BYPASS=false
+WEB_RUNTIME_SECRETS=AUTH_SECRET=AUTH_SECRET:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET:latest,JWT_SECRET=JWT_SECRET:latest,ADMIN_MOBILE_NUMBERS=ADMIN_MOBILE_NUMBERS:latest
+```
+
+Example `prod` environment secrets:
+```text
+WEB_AUTH_URL=https://www.seereyaana.com
+WEB_NEXT_PUBLIC_API_URL=https://api.seereyaana.com
+WEB_NEXT_PUBLIC_RZP_KEY=rzp_live_xxx
+WEB_AUTH_SECRET=<prod auth secret>
+```
+
+And reference production OAuth credentials from GCP Secret Manager through `WEB_RUNTIME_SECRETS`, for example:
+```text
+WEB_RUNTIME_SECRETS=AUTH_SECRET=AUTH_SECRET:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET:latest,JWT_SECRET=JWT_SECRET:latest,ADMIN_MOBILE_NUMBERS=ADMIN_MOBILE_NUMBERS:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,FACEBOOK_CLIENT_ID=FACEBOOK_CLIENT_ID:latest,FACEBOOK_CLIENT_SECRET=FACEBOOK_CLIENT_SECRET:latest,AUTH_APPLE_ID=AUTH_APPLE_ID:latest,AUTH_APPLE_SECRET=AUTH_APPLE_SECRET:latest
+```
+
+### 10.4 Workload Identity Federation
+Use GitHub Actions → GCP Workload Identity Federation instead of JSON service-account keys:
+- `GCP_WIF_PROVIDER`: `projects/.../locations/global/workloadIdentityPools/.../providers/...`
+- `GCP_DEPLOY_SA`: service account with permissions for Cloud Run deploy, Artifact Registry push, and reading Secret Manager metadata
+
+Minimum roles for the deploy service account usually include:
+- `roles/run.admin`
+- `roles/artifactregistry.writer`
+- `roles/iam.serviceAccountUser`
+- `roles/secretmanager.viewer`
+
+### 10.5 What the deploy workflow does
+On each deploy it will:
+1. Authenticate to GCP using Workload Identity Federation.
+2. Build and push the API image.
+3. Deploy API to Cloud Run with environment-specific env vars and Secret Manager bindings.
+4. Verify `GET /health` on the deployed API.
+5. Build and push the web image using the environment-specific public URLs.
+6. Deploy web to Cloud Run.
+7. Verify the deployed web service responds.
+
+### 10.6 Important behavior changes
+- The API container now runs `prisma migrate deploy` on startup instead of `prisma db push`.
+- `WEB_RUNTIME_SECRETS` should include `JWT_SECRET`, because the web app signs the admin bootstrap cookie.
+- `ADMIN_MOBILE_NUMBERS` can be supplied through `WEB_RUNTIME_SECRETS` instead of `WEB_RUNTIME_ENV_VARS` if you do not want admin numbers visible in plain deployment config.
+- OAuth provider credentials for the web app can be supplied through `WEB_RUNTIME_SECRETS`; they do not need to be GitHub secrets or web build args.
+- `WEB_API_INTERNAL_URL` is optional; if omitted, the workflow automatically uses the deployed API service URL.
 
 ---
 
