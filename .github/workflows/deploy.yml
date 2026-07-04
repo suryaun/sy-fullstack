@@ -93,6 +93,7 @@ jobs:
       WEB_RUNTIME_SECRETS: ${{ vars.WEB_RUNTIME_SECRETS }}
       WEB_API_INTERNAL_URL: ${{ vars.WEB_API_INTERNAL_URL }}
       WEB_ADMIN_API_INTERNAL_URL: ${{ vars.WEB_ADMIN_API_INTERNAL_URL }}
+      RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SA || vars.GCP_DEPLOY_SA }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -160,6 +161,7 @@ jobs:
           gcloud run deploy "${API_SERVICE}" \
             --image="${API_IMAGE}" \
             --region="${REGION}" --platform=managed --allow-unauthenticated \
+            --service-account="${RUNTIME_SERVICE_ACCOUNT}" \
             --port=4000 --cpu=1 --memory=512Mi \
             --min-instances=0 --max-instances=4 --concurrency=80 \
             --set-env-vars="${api_env_vars}" \
@@ -208,6 +210,7 @@ jobs:
           gcloud run deploy "${WEB_SERVICE}" \
             --image="${WEB_IMAGE}" \
             --region="${REGION}" --platform=managed --allow-unauthenticated \
+            --service-account="${RUNTIME_SERVICE_ACCOUNT}" \
             --port=3000 --cpu=1 --memory=512Mi \
             --min-instances=0 --max-instances=4 --concurrency=80 \
             --set-env-vars="${web_env_vars}" \
