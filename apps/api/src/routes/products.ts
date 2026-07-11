@@ -77,7 +77,6 @@ const productDetailSelect = Prisma.validator<Prisma.ProductSelect>()({
   craft: true,
   lengthInMeters: true,
   blouseIncluded: true,
-  hidden: true,
   priceInPaise: true,
   stockStatus: true,
   hidden: true,
