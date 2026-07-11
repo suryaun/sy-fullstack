@@ -14,6 +14,7 @@ const productListSelect = Prisma.validator<Prisma.ProductSelect>()({
   blouseIncluded: true,
   priceInPaise: true,
   stockStatus: true,
+  hidden: true,
   imageUrl: true,
   images: {
     orderBy: { sortOrder: "asc" },
@@ -66,6 +67,7 @@ const productDetailSelect = Prisma.validator<Prisma.ProductSelect>()({
   blouseIncluded: true,
   priceInPaise: true,
   stockStatus: true,
+  hidden: true,
   imageUrl: true,
   imagePublicId: true,
   createdAt: true,

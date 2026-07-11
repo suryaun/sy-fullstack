@@ -1453,9 +1453,10 @@ router.post("/products/:id/colors/:colorId/restock", requireAdmin, async (req, r
     return res.status(400).json({ message: "Color SKU is missing" });
   }
 
+  const colorSku = color.sku;
   const updated = await prisma.$transaction(async (tx) => {
     // Generate and insert new pieces.
-    await generatePieces(tx, colorId, color.sku, quantity);
+    await generatePieces(tx, colorId, colorSku, quantity);
 
     // Update the color's stock quantity.
     return tx.productColor.update({
