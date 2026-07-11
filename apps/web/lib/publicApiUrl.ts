@@ -4,6 +4,7 @@ declare global {
   interface Window {
     __SEERE_YAANA_RUNTIME_CONFIG__?: {
       apiUrl?: string;
+      releaseVersion?: string;
     };
   }
 }
@@ -14,6 +15,14 @@ function getRuntimeApiUrl() {
   }
 
   return window.__SEERE_YAANA_RUNTIME_CONFIG__?.apiUrl;
+}
+
+export function getRuntimeReleaseVersion() {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  return window.__SEERE_YAANA_RUNTIME_CONFIG__?.releaseVersion;
 }
 
 function buildBrowserFallbackUrl() {

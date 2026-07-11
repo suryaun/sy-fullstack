@@ -99,7 +99,7 @@ jobs:
           web_env_vars="NODE_ENV=production,NEXT_PUBLIC_API_URL=${WEB_NEXT_PUBLIC_API_URL},API_INTERNAL_URL=${api_internal_url},ADMIN_API_INTERNAL_URL=${admin_api_internal_url},AUTH_URL=${WEB_AUTH_URL},NEXT_PUBLIC_RAZORPAY_KEY_ID=${WEB_NEXT_PUBLIC_RZP_KEY}"
           [[ -z "$WEB_NEXT_PUBLIC_BRAND_LOGO" ]] || web_env_vars="${web_env_vars},NEXT_PUBLIC_BRAND_LOGO=${WEB_NEXT_PUBLIC_BRAND_LOGO}"
           [[ -z "$WEB_RUNTIME_ENV_VARS" ]] || web_env_vars="${web_env_vars},${WEB_RUNTIME_ENV_VARS}"
-          gcloud run deploy "$WEB_SERVICE" --image="$web_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=3000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$web_env_vars" --set-secrets="$WEB_RUNTIME_SECRETS"
+          gcloud run deploy "$WEB_SERVICE" --image="$web_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=3000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$web_env_vars,RELEASE_VERSION=${VERSION}" --set-secrets="$WEB_RUNTIME_SECRETS"
           web_url="$(gcloud run services describe "$WEB_SERVICE" --region="$REGION" --format='value(status.url)')"
           curl --fail --show-error --silent --location "$web_url" > /dev/null
           printf 'Test deployment succeeded for %s\nAPI: %s\nWeb: %s\n' "$VERSION" "$api_image" "$web_image" >> "$GITHUB_STEP_SUMMARY"
@@ -148,7 +148,7 @@ jobs:
           web_env_vars="NODE_ENV=production,NEXT_PUBLIC_API_URL=${WEB_NEXT_PUBLIC_API_URL},API_INTERNAL_URL=${api_internal_url},ADMIN_API_INTERNAL_URL=${admin_api_internal_url},AUTH_URL=${WEB_AUTH_URL},NEXT_PUBLIC_RAZORPAY_KEY_ID=${WEB_NEXT_PUBLIC_RZP_KEY}"
           [[ -z "$WEB_NEXT_PUBLIC_BRAND_LOGO" ]] || web_env_vars="${web_env_vars},NEXT_PUBLIC_BRAND_LOGO=${WEB_NEXT_PUBLIC_BRAND_LOGO}"
           [[ -z "$WEB_RUNTIME_ENV_VARS" ]] || web_env_vars="${web_env_vars},${WEB_RUNTIME_ENV_VARS}"
-          gcloud run deploy "$WEB_SERVICE" --image="$web_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=3000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$web_env_vars" --set-secrets="$WEB_RUNTIME_SECRETS"
+          gcloud run deploy "$WEB_SERVICE" --image="$web_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=3000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$web_env_vars,RELEASE_VERSION=${VERSION}" --set-secrets="$WEB_RUNTIME_SECRETS"
           web_url="$(gcloud run services describe "$WEB_SERVICE" --region="$REGION" --format='value(status.url)')"
           curl --fail --show-error --silent --location "$web_url" > /dev/null
           printf 'Production promotion succeeded for %s\nAPI: %s\nWeb: %s\n' "$VERSION" "$api_image" "$web_image" >> "$GITHUB_STEP_SUMMARY"
