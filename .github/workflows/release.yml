@@ -56,7 +56,7 @@ jobs:
           [[ "$title" =~ $conventional_title_pattern ]] || { echo "Neither the squash title nor PR title is Conventional Commits compliant" >&2; exit 1; }
           type="${BASH_REMATCH[1]}"
           breaking="false"
-          [[ "$TITLE" =~ ^[^:]+!:\  ]] && breaking="true"
+          [[ "$title" =~ ^[^:]+!:\  ]] && breaking="true"
           case "$type" in
             feat) bump="minor" ;;
             fix|perf) bump="patch" ;;
