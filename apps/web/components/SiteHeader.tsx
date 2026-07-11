@@ -3,19 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
 import UserAuthChip from "@/components/UserAuthChip";
-import { getRuntimeReleaseVersion } from "@/lib/publicApiUrl";
 import { useStore } from "@/components/StoreProvider";
 
 export default function SiteHeader() {
   const pathname = usePathname();
   const { wishlistCount, cartCount } = useStore();
-  const [releaseVersion, setReleaseVersion] = useState<string>();
-
-  useEffect(() => {
-    setReleaseVersion(getRuntimeReleaseVersion());
-  }, []);
 
   const isActive = (href: string) => pathname === href;
 
@@ -36,11 +29,6 @@ export default function SiteHeader() {
           <span className="font-serif text-2xl italic tracking-wide text-ink sm:text-3xl">
             Seere Yaana
           </span>
-          {releaseVersion ? (
-            <span className="hidden border-l border-[#e4d9d0] pl-3 text-[10px] uppercase tracking-[0.14em] text-[#8a7467] sm:inline">
-              {releaseVersion}
-            </span>
-          ) : null}
         </Link>
 
         <nav className="flex items-center gap-5 text-[11px] uppercase tracking-[0.18em] text-[#5c4a42]">

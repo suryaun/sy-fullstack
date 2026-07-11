@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Script from "next/script";
 import AuthProvider from "@/components/AuthProvider";
+import SiteFooter from "@/components/SiteFooter";
 import SiteHeader from "@/components/SiteHeader";
 import StoreProvider from "@/components/StoreProvider";
 import "./globals.css";
@@ -29,6 +30,7 @@ export default function RootLayout({
           <StoreProvider>
             <SiteHeader />
             {children}
+            <SiteFooter />
           </StoreProvider>
         </AuthProvider>
       </body>
