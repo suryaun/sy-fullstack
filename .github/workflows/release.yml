@@ -41,11 +41,19 @@ jobs:
       - name: Calculate version from merge title
         id: release
         env:
-          TITLE: ${{ github.event.pull_request.title }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
           conventional_title_pattern='^(feat|fix|perf|docs|chore|refactor|test|style|ci)(\([^)]+\))?!?: .+'
-          [[ "$TITLE" =~ $conventional_title_pattern ]] || { echo "Merged PR title is not Conventional Commits compliant: $TITLE" >&2; exit 1; }
+          title="$PR_TITLE"
+          squash_title="$(git log -1 --format=%s "$MERGE_SHA")"
+
+          if [[ "$squash_title" =~ $conventional_title_pattern ]]; then
+            title="$squash_title"
+          fi
+
+          [[ "$title" =~ $conventional_title_pattern ]] || { echo "Neither the squash title nor PR title is Conventional Commits compliant" >&2; exit 1; }
           type="${BASH_REMATCH[1]}"
           breaking="false"
           [[ "$TITLE" =~ ^[^:]+!:\  ]] && breaking="true"
@@ -69,11 +77,12 @@ jobs:
           fi
           echo "should_release=true" >> "$GITHUB_OUTPUT"
           echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
       - name: Create annotated release tag
         if: ${{ steps.release.outputs.should_release == 'true' }}
         env:
           VERSION: ${{ steps.release.outputs.version }}
-          TITLE: ${{ github.event.pull_request.title }}
+          TITLE: ${{ steps.release.outputs.title }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |

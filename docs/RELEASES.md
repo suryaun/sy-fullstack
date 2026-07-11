@@ -1,7 +1,8 @@
 # Releases and Deployments
 
 `main` is the only release branch. Pull requests must use a Conventional Commit
-title. The merged title determines whether the workflow creates a semantic tag.
+title. On squash merge, a Conventional Commit squash title takes precedence for
+the release version; otherwise the pull request title determines the release.
 
 | Pull request title | Result |
 | --- | --- |
