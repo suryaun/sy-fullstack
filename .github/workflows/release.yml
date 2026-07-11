@@ -1,0 +1,85 @@
+name: Create semantic release tag
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, closed]
+    branches: [main]
+
+concurrency:
+  group: semantic-release-main
+  cancel-in-progress: false
+
+jobs:
+  validate-title:
+    name: Validate release title
+    if: ${{ github.event.action != 'closed' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a conventional merge title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          conventional_title_pattern='^(feat|fix|perf|docs|chore|refactor|test|style|ci)(\([^)]+\))?!?: .+'
+          [[ "$TITLE" =~ $conventional_title_pattern ]] || {
+            echo "Use a Conventional Commit title, e.g. feat(checkout): add address validation" >&2
+            exit 1
+          }
+
+  tag-release:
+    name: Calculate and create release tag
+    if: ${{ github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout merged main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Calculate version from merge title
+        id: release
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          conventional_title_pattern='^(feat|fix|perf|docs|chore|refactor|test|style|ci)(\([^)]+\))?!?: .+'
+          [[ "$TITLE" =~ $conventional_title_pattern ]] || { echo "Merged PR title is not Conventional Commits compliant: $TITLE" >&2; exit 1; }
+          type="${BASH_REMATCH[1]}"
+          breaking="false"
+          [[ "$TITLE" =~ ^[^:]+!:\  ]] && breaking="true"
+          case "$type" in
+            feat) bump="minor" ;;
+            fix|perf) bump="patch" ;;
+            *) echo "No release tag for ${type} pull requests."; echo "should_release=false" >> "$GITHUB_OUTPUT"; exit 0 ;;
+          esac
+          [[ "$breaking" == "true" ]] && bump="major"
+          latest="$(git tag --list 'v[0-9]*' --sort=-version:refname | head -n 1)"
+          if [[ -z "$latest" ]]; then
+            next="v1.0.0"
+          else
+            version="${latest#v}"
+            IFS=. read -r major minor patch <<< "$version"
+            case "$bump" in
+              major) next="v$((major + 1)).0.0" ;;
+              minor) next="v${major}.$((minor + 1)).0" ;;
+              patch) next="v${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+      - name: Create annotated release tag
+        if: ${{ steps.release.outputs.should_release == 'true' }}
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rev-parse --verify "${MERGE_SHA}^{commit}" >/dev/null
+          git tag --annotate "$VERSION" "$MERGE_SHA" --message "${VERSION}: ${TITLE} (#${PR_NUMBER})"
+          git push origin "$VERSION"

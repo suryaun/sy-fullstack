@@ -15,6 +15,12 @@ type CheckoutItem = {
   quantity: number;
 };
 
+type RazorpayOrderResponse = {
+  id: string;
+  amount: number | string;
+  currency: string;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /order
 // Validates items, acquires / renews stock reservations (blocks other
@@ -302,14 +308,14 @@ router.post("/order", async (req, res) => {
     const { order, amountInPaise } = txResult;
 
     // ── Create Razorpay order (external call — outside DB tx) ─────────────────
-    let razorpayOrder: Awaited<ReturnType<typeof razorpay.orders.create>>;
+    let razorpayOrder: RazorpayOrderResponse;
     try {
-      razorpayOrder = await razorpay.orders.create({
+      razorpayOrder = (await razorpay.orders.create({
         amount: amountInPaise,
         currency: "INR",
         receipt: order.id,
         notes: { internalOrderId: order.id },
-      });
+      })) as RazorpayOrderResponse;
     } catch (rzErr) {
       // Release reservations so the customer can retry immediately
       await prisma.stockReservation.deleteMany({
