@@ -5,26 +5,6 @@ RUN npm install
 
 FROM node:20-alpine AS builder
 WORKDIR /app
-ARG AUTH_URL
-ARG AUTH_SECRET
-ARG API_INTERNAL_URL
-ARG NEXT_PUBLIC_API_URL
-ARG GOOGLE_CLIENT_ID
-ARG GOOGLE_CLIENT_SECRET
-ARG FACEBOOK_CLIENT_ID
-ARG FACEBOOK_CLIENT_SECRET
-ARG AUTH_APPLE_ID
-ARG AUTH_APPLE_SECRET
-ENV AUTH_URL=$AUTH_URL
-ENV AUTH_SECRET=$AUTH_SECRET
-ENV API_INTERNAL_URL=$API_INTERNAL_URL
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ENV GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
-ENV GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
-ENV FACEBOOK_CLIENT_ID=$FACEBOOK_CLIENT_ID
-ENV FACEBOOK_CLIENT_SECRET=$FACEBOOK_CLIENT_SECRET
-ENV AUTH_APPLE_ID=$AUTH_APPLE_ID
-ENV AUTH_APPLE_SECRET=$AUTH_APPLE_SECRET
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
@@ -37,5 +17,7 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+ENTRYPOINT ["./docker-entrypoint.sh"]

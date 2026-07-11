@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import AuthProvider from "@/components/AuthProvider";
 import SiteHeader from "@/components/SiteHeader";
 import StoreProvider from "@/components/StoreProvider";
@@ -20,6 +21,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <Script src="/runtime-config.js" strategy="beforeInteractive" />
+      </head>
       <body className="font-sans antialiased">
         <AuthProvider>
           <StoreProvider>

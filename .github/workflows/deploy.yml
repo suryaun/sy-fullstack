@@ -1,124 +1,154 @@
-name: Deploy to Cloud Run
+name: Deploy tagged release to Cloud Run
 
-# ============================================================================
-# DORMANT BY DEFAULT — this workflow does nothing until you enable it.
-#
-# Every job is gated on the repository variable DEPLOY_ENABLED == 'true'.
-# Until you set that variable, runs are skipped (green, no-op). This lets the
-# file live in the repo safely while you are still testing manually.
-#
-# ---------------------------------------------------------------------------
-# HOW TO ENABLE (after Phases 1–5 of docs/DEPLOYMENT_GCP_CLOUDRUN_NEON.md):
-#
-# 1. Set up Workload Identity Federation (no long-lived keys):
-#      https://github.com/google-github-actions/auth#preferred-direct-workload-identity-federation
-#
-# 2. In GitHub → Settings → Secrets and variables → Actions, add:
-#    Variables:
-#      DEPLOY_ENABLED            = true
-#      GCP_PROJECT_ID            = seere-yaana-prod
-#      GCP_REGION               = asia-south1
-#      GCP_WIF_PROVIDER         = projects/NUM/locations/global/workloadIdentityPools/POOL/providers/PROVIDER
-#      GCP_DEPLOY_SA            = deployer@seere-yaana-prod.iam.gserviceaccount.com
-#      AR_REPO                  = seere-yaana          # Artifact Registry repo
-#    (Web public build args — non-secret:)
-#      WEB_NEXT_PUBLIC_API_URL  = https://api.yourdomain.com
-#      WEB_API_INTERNAL_URL     = https://seere-yaana-api-xxxx.a.run.app
-#      WEB_AUTH_URL             = https://www.yourdomain.com
-#      WEB_NEXT_PUBLIC_RZP_KEY  = rzp_live_xxx
-#    Secrets (build-time for the web image):
-#      WEB_AUTH_SECRET, WEB_GOOGLE_CLIENT_ID, WEB_GOOGLE_CLIENT_SECRET,
-#      WEB_FACEBOOK_CLIENT_ID, WEB_FACEBOOK_CLIENT_SECRET,
-#      WEB_AUTH_APPLE_ID, WEB_AUTH_APPLE_SECRET
-#
-# 3. Runtime secrets (DATABASE_URL, RAZORPAY_*, IMAGEKIT_*, etc.) are read by
-#    Cloud Run from Secret Manager (see Phase 4) — NOT from GitHub.
-#
-# Branch model:
-#   push to `staging` → deploys *-test services    (set env=test vars accordingly)
-#   push to `main`    → deploys production services
-# ============================================================================
-
+# Test builds a selected Git tag once. Production deploys the exact Artifact
+# Registry digests created for that tag and never rebuilds source.
 on:
-  push:
-    branches: [main]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing release tag (for example v1.2.3)
+        required: true
+        type: string
+      target:
+        description: Deployment environment
+        required: true
+        type: choice
+        options: [test, prod]
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ inputs.target }}
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Build images & deploy
+  deploy-test:
+    name: Build ${{ inputs.version }} and deploy to test
+    if: ${{ inputs.target == 'test' }}
     runs-on: ubuntu-latest
-    # Gate: skipped entirely until you create the DEPLOY_ENABLED variable.
-    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    environment: test
     permissions:
       contents: read
-      id-token: write          # required for Workload Identity Federation
-    env:
+      id-token: write
+    env: &deployment_env
       PROJECT: ${{ vars.GCP_PROJECT_ID }}
       REGION: ${{ vars.GCP_REGION }}
-      AR: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.AR_REPO }}
+      AR_REPO: ${{ vars.AR_REPO }}
+      API_SERVICE: ${{ vars.API_SERVICE }}
+      WEB_SERVICE: ${{ vars.WEB_SERVICE }}
+      API_RUNTIME_ENV_VARS: ${{ vars.API_RUNTIME_ENV_VARS }}
+      API_RUNTIME_SECRETS: ${{ vars.API_RUNTIME_SECRETS }}
+      WEB_AUTH_URL: ${{ secrets.WEB_AUTH_URL }}
+      WEB_NEXT_PUBLIC_API_URL: ${{ secrets.WEB_NEXT_PUBLIC_API_URL }}
+      WEB_NEXT_PUBLIC_RZP_KEY: ${{ secrets.WEB_NEXT_PUBLIC_RZP_KEY }}
+      WEB_AUTH_SECRET: ${{ secrets.WEB_AUTH_SECRET }}
+      WEB_NEXT_PUBLIC_BRAND_LOGO: ${{ vars.WEB_NEXT_PUBLIC_BRAND_LOGO }}
+      WEB_RUNTIME_ENV_VARS: ${{ vars.WEB_RUNTIME_ENV_VARS }}
+      WEB_RUNTIME_SECRETS: ${{ vars.WEB_RUNTIME_SECRETS }}
+      WEB_API_INTERNAL_URL: ${{ vars.WEB_API_INTERNAL_URL }}
+      WEB_ADMIN_API_INTERNAL_URL: ${{ vars.WEB_ADMIN_API_INTERNAL_URL }}
+      RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SA || vars.GCP_DEPLOY_SA }}
     steps:
-      - name: Checkout
+      - name: Validate release version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Use a version such as v1.2.3" >&2; exit 1; }
+      - name: Checkout tagged source
         uses: actions/checkout@v4
-
+        with:
+          ref: ${{ inputs.version }}
+      - name: Validate deployment configuration
+        run: |
+          set -euo pipefail
+          required=(PROJECT REGION AR_REPO API_SERVICE WEB_SERVICE API_RUNTIME_SECRETS WEB_AUTH_URL WEB_NEXT_PUBLIC_API_URL WEB_NEXT_PUBLIC_RZP_KEY WEB_AUTH_SECRET WEB_RUNTIME_SECRETS)
+          for name in "${required[@]}"; do [[ -n "${!name:-}" ]] || { echo "Missing test environment setting: ${name}" >&2; exit 1; }; done
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SA }}
-
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
-
-      - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
-      # ---------------- API ----------------
-      - name: Build & push API image
+      - name: Build, publish, and deploy test release
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          IMAGE="${AR}/api:${GITHUB_SHA::8}"
-          docker build --platform linux/amd64 -t "$IMAGE" apps/api
-          docker push "$IMAGE"
-          echo "API_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          set -euo pipefail
+          ar="${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}"
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          for image in api web; do
+            if gcloud artifacts docker images describe "${ar}/${image}:${VERSION}" --format='value(image_summary.digest)' >/dev/null 2>&1; then echo "${image}:${VERSION} already exists; version tags are immutable." >&2; exit 1; fi
+          done
+          api_tag="${ar}/api:${VERSION}"
+          docker build --platform linux/amd64 --tag "$api_tag" apps/api
+          docker push "$api_tag"
+          api_digest="$(gcloud artifacts docker images describe "$api_tag" --format='value(image_summary.digest)')"
+          api_image="${ar}/api@${api_digest}"
+          api_env_vars="NODE_ENV=production"
+          [[ -z "$API_RUNTIME_ENV_VARS" ]] || api_env_vars="${api_env_vars},${API_RUNTIME_ENV_VARS}"
+          gcloud run deploy "$API_SERVICE" --image="$api_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=4000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$api_env_vars" --set-secrets="$API_RUNTIME_SECRETS"
+          api_url="$(gcloud run services describe "$API_SERVICE" --region="$REGION" --format='value(status.url)')"
+          curl --fail --show-error --silent "${api_url}/health"
+          web_tag="${ar}/web:${VERSION}"
+          docker build --platform linux/amd64 --tag "$web_tag" apps/web
+          docker push "$web_tag"
+          web_digest="$(gcloud artifacts docker images describe "$web_tag" --format='value(image_summary.digest)')"
+          web_image="${ar}/web@${web_digest}"
+          api_internal_url="${WEB_API_INTERNAL_URL:-${api_url}}"
+          admin_api_internal_url="${WEB_ADMIN_API_INTERNAL_URL:-${api_internal_url}}"
+          web_env_vars="NODE_ENV=production,NEXT_PUBLIC_API_URL=${WEB_NEXT_PUBLIC_API_URL},API_INTERNAL_URL=${api_internal_url},ADMIN_API_INTERNAL_URL=${admin_api_internal_url},AUTH_URL=${WEB_AUTH_URL},NEXT_PUBLIC_RAZORPAY_KEY_ID=${WEB_NEXT_PUBLIC_RZP_KEY}"
+          [[ -z "$WEB_NEXT_PUBLIC_BRAND_LOGO" ]] || web_env_vars="${web_env_vars},NEXT_PUBLIC_BRAND_LOGO=${WEB_NEXT_PUBLIC_BRAND_LOGO}"
+          [[ -z "$WEB_RUNTIME_ENV_VARS" ]] || web_env_vars="${web_env_vars},${WEB_RUNTIME_ENV_VARS}"
+          gcloud run deploy "$WEB_SERVICE" --image="$web_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=3000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$web_env_vars" --set-secrets="$WEB_RUNTIME_SECRETS"
+          web_url="$(gcloud run services describe "$WEB_SERVICE" --region="$REGION" --format='value(status.url)')"
+          curl --fail --show-error --silent --location "$web_url" > /dev/null
+          printf 'Test deployment succeeded for %s\nAPI: %s\nWeb: %s\n' "$VERSION" "$api_image" "$web_image" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Deploy API to Cloud Run
+  deploy-prod:
+    name: Promote ${{ inputs.version }} to production
+    if: ${{ inputs.target == 'prod' }}
+    runs-on: ubuntu-latest
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    env: *deployment_env
+    steps:
+      - name: Validate release version
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          gcloud run deploy seere-yaana-api \
-            --image="${API_IMAGE}" \
-            --region="${REGION}" --platform=managed --allow-unauthenticated \
-            --port=4000 --cpu=1 --memory=512Mi \
-            --min-instances=0 --max-instances=4 --concurrency=80 \
-            --set-secrets="DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,RAZORPAY_WEBHOOK_SECRET=RAZORPAY_WEBHOOK_SECRET:latest,IMAGEKIT_PUBLIC_KEY=IMAGEKIT_PUBLIC_KEY:latest,IMAGEKIT_PRIVATE_KEY=IMAGEKIT_PRIVATE_KEY:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET:latest,DELHIVERY_API_TOKEN=DELHIVERY_API_TOKEN:latest"
-
-      # ---------------- WEB ----------------
-      # NEXT_PUBLIC_* and auth values are baked at build time (see web Dockerfile).
-      - name: Build & push Web image
+          set -euo pipefail
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Use a version such as v1.2.3" >&2; exit 1; }
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Promote tested image digests
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
-          IMAGE="${AR}/web:${GITHUB_SHA::8}"
-          docker build --platform linux/amd64 -t "$IMAGE" apps/web \
-            --build-arg AUTH_URL="${{ vars.WEB_AUTH_URL }}" \
-            --build-arg AUTH_SECRET="${{ secrets.WEB_AUTH_SECRET }}" \
-            --build-arg NEXT_PUBLIC_API_URL="${{ vars.WEB_NEXT_PUBLIC_API_URL }}" \
-            --build-arg API_INTERNAL_URL="${{ vars.WEB_API_INTERNAL_URL }}" \
-            --build-arg GOOGLE_CLIENT_ID="${{ secrets.WEB_GOOGLE_CLIENT_ID }}" \
-            --build-arg GOOGLE_CLIENT_SECRET="${{ secrets.WEB_GOOGLE_CLIENT_SECRET }}" \
-            --build-arg FACEBOOK_CLIENT_ID="${{ secrets.WEB_FACEBOOK_CLIENT_ID }}" \
-            --build-arg FACEBOOK_CLIENT_SECRET="${{ secrets.WEB_FACEBOOK_CLIENT_SECRET }}" \
-            --build-arg AUTH_APPLE_ID="${{ secrets.WEB_AUTH_APPLE_ID }}" \
-            --build-arg AUTH_APPLE_SECRET="${{ secrets.WEB_AUTH_APPLE_SECRET }}"
-          docker push "$IMAGE"
-          echo "WEB_IMAGE=$IMAGE" >> "$GITHUB_ENV"
-
-      - name: Deploy Web to Cloud Run
-        run: |
-          gcloud run deploy seere-yaana-web \
-            --image="${WEB_IMAGE}" \
-            --region="${REGION}" --platform=managed --allow-unauthenticated \
-            --port=3000 --cpu=1 --memory=512Mi \
-            --min-instances=0 --max-instances=4 --concurrency=80 \
-            --set-env-vars="NODE_ENV=production,NEXT_PUBLIC_API_URL=${{ vars.WEB_NEXT_PUBLIC_API_URL }},API_INTERNAL_URL=${{ vars.WEB_API_INTERNAL_URL }},ADMIN_API_INTERNAL_URL=${{ vars.WEB_API_INTERNAL_URL }},AUTH_URL=${{ vars.WEB_AUTH_URL }},NEXT_PUBLIC_RAZORPAY_KEY_ID=${{ vars.WEB_NEXT_PUBLIC_RZP_KEY }}" \
-            --set-secrets="AUTH_SECRET=AUTH_SECRET:latest,ADMIN_PROXY_SHARED_SECRET=ADMIN_PROXY_SHARED_SECRET:latest"
+          set -euo pipefail
+          ar="${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}"
+          api_digest="$(gcloud artifacts docker images describe "${ar}/api:${VERSION}" --format='value(image_summary.digest)')"
+          web_digest="$(gcloud artifacts docker images describe "${ar}/web:${VERSION}" --format='value(image_summary.digest)')"
+          [[ -n "$api_digest" && -n "$web_digest" ]] || { echo "Release ${VERSION} has no test-built artifacts." >&2; exit 1; }
+          api_image="${ar}/api@${api_digest}"
+          web_image="${ar}/web@${web_digest}"
+          api_env_vars="NODE_ENV=production"
+          [[ -z "$API_RUNTIME_ENV_VARS" ]] || api_env_vars="${api_env_vars},${API_RUNTIME_ENV_VARS}"
+          gcloud run deploy "$API_SERVICE" --image="$api_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=4000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$api_env_vars" --set-secrets="$API_RUNTIME_SECRETS"
+          api_url="$(gcloud run services describe "$API_SERVICE" --region="$REGION" --format='value(status.url)')"
+          curl --fail --show-error --silent "${api_url}/health"
+          api_internal_url="${WEB_API_INTERNAL_URL:-${api_url}}"
+          admin_api_internal_url="${WEB_ADMIN_API_INTERNAL_URL:-${api_internal_url}}"
+          web_env_vars="NODE_ENV=production,NEXT_PUBLIC_API_URL=${WEB_NEXT_PUBLIC_API_URL},API_INTERNAL_URL=${api_internal_url},ADMIN_API_INTERNAL_URL=${admin_api_internal_url},AUTH_URL=${WEB_AUTH_URL},NEXT_PUBLIC_RAZORPAY_KEY_ID=${WEB_NEXT_PUBLIC_RZP_KEY}"
+          [[ -z "$WEB_NEXT_PUBLIC_BRAND_LOGO" ]] || web_env_vars="${web_env_vars},NEXT_PUBLIC_BRAND_LOGO=${WEB_NEXT_PUBLIC_BRAND_LOGO}"
+          [[ -z "$WEB_RUNTIME_ENV_VARS" ]] || web_env_vars="${web_env_vars},${WEB_RUNTIME_ENV_VARS}"
+          gcloud run deploy "$WEB_SERVICE" --image="$web_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=3000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$web_env_vars" --set-secrets="$WEB_RUNTIME_SECRETS"
+          web_url="$(gcloud run services describe "$WEB_SERVICE" --region="$REGION" --format='value(status.url)')"
+          curl --fail --show-error --silent --location "$web_url" > /dev/null
+          printf 'Production promotion succeeded for %s\nAPI: %s\nWeb: %s\n' "$VERSION" "$api_image" "$web_image" >> "$GITHUB_STEP_SUMMARY"

@@ -1,5 +1,21 @@
 const FALLBACK_API_PORT = "4000";
 
+declare global {
+  interface Window {
+    __SEERE_YAANA_RUNTIME_CONFIG__?: {
+      apiUrl?: string;
+    };
+  }
+}
+
+function getRuntimeApiUrl() {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  return window.__SEERE_YAANA_RUNTIME_CONFIG__?.apiUrl;
+}
+
 function buildBrowserFallbackUrl() {
   if (typeof window === "undefined") {
     return `http://localhost:${FALLBACK_API_PORT}`;
@@ -13,7 +29,7 @@ function isRazorpayHost(hostname: string) {
 }
 
 export function getPublicApiUrl() {
-  const configured = process.env.NEXT_PUBLIC_API_URL;
+  const configured = getRuntimeApiUrl() ?? process.env.NEXT_PUBLIC_API_URL;
 
   if (typeof window === "undefined") {
     if (!configured) {
