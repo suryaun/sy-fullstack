@@ -12,28 +12,6 @@ enum StockStatus {
   SOLD_OUT
 }
 
-enum Material {
-  SILK
-  CHIFFON
-  COTTON
-  GEORGETTE
-  ORGANZA
-  LINEN
-  CREPE
-  SATIN
-}
-
-enum Craft {
-  BANARASI
-  KANJEEVARAM
-  BANDHANI
-  CHIKANKARI
-  PAITHANI
-  PATOLA
-  JAMDANI
-  TUSSAR
-}
-
 enum OrderStatus {
   PENDING
   PAID
@@ -70,8 +48,8 @@ model Product {
   sequenceNumber  Int         @default(autoincrement())
   name            String
   description     String
-  fabric          Material
-  craft           Craft
+  fabric          String
+  craft           String
   lengthInMeters  Float
   blouseIncluded  Boolean     @default(false)
   hasHandloomMark Boolean     @default(false)

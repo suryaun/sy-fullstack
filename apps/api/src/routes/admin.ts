@@ -57,6 +57,14 @@ type CategoryRelationRow = {
 
 type PrismaClientLike = Prisma.TransactionClient | typeof prisma;
 
+function normalizeProductAttribute(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+
+  return value.trim();
+}
+
 const DEFAULT_CATEGORY_BLUEPRINT: CategorySeedNode[] = [
   {
     name: "Ilkal Sarees",
@@ -424,7 +432,13 @@ router.post("/products", requireAdmin, async (req, res) => {
   } = req.body;
 
   const normalizedCategoryIds = normalizeCategoryIds(categoryIds);
+  const normalizedFabric = normalizeProductAttribute(fabric);
+  const normalizedCraft = normalizeProductAttribute(craft);
   let hierarchicalCategoryIds = normalizedCategoryIds;
+
+  if (!normalizedFabric || !normalizedCraft) {
+    return res.status(400).json({ message: "Material and saree category are required" });
+  }
 
   const uploads = Array.isArray(imageUploads)
     ? (imageUploads as Array<{ imageUrl: string; imagePublicId?: string }>).filter((item) => item?.imageUrl)
@@ -462,8 +476,8 @@ router.post("/products", requireAdmin, async (req, res) => {
       data: {
         name,
         description,
-        fabric,
-        craft,
+        fabric: normalizedFabric,
+        craft: normalizedCraft,
         lengthInMeters,
         blouseIncluded,
         hasHandloomMark: Boolean(req.body.hasHandloomMark),

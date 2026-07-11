@@ -122,24 +122,8 @@ type AdminProduct = {
 type ProductForm = {
   name: string;
   description: string;
-  fabric:
-    | "SILK"
-    | "CHIFFON"
-    | "COTTON"
-    | "GEORGETTE"
-    | "ORGANZA"
-    | "LINEN"
-    | "CREPE"
-    | "SATIN";
-  craft:
-    | "BANARASI"
-    | "KANJEEVARAM"
-    | "BANDHANI"
-    | "CHIKANKARI"
-    | "PAITHANI"
-    | "PATOLA"
-    | "JAMDANI"
-    | "TUSSAR";
+  fabric: string;
+  craft: string;
   lengthInMeters: string;
   blouseIncluded: boolean;
   hasHandloomMark: boolean;
@@ -438,8 +422,8 @@ export default function AdminPage() {
   const [form, setForm] = useState<ProductForm>({
     name: "",
     description: "",
-    fabric: "SILK",
-    craft: "BANARASI",
+    fabric: "Silk",
+    craft: "Banarasi",
     lengthInMeters: "5.5",
     blouseIncluded: true,
     hasHandloomMark: false,
@@ -1834,44 +1818,28 @@ export default function AdminPage() {
                 </div>
               ) : null}
               <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={form.fabric}
-                  onChange={(event) =>
-                    updateField(
-                      "fabric",
-                      event.target.value as ProductForm["fabric"],
-                    )
-                  }
-                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-                >
-                  <option value="SILK">Silk</option>
-                  <option value="CHIFFON">Chiffon</option>
-                  <option value="COTTON">Cotton</option>
-                  <option value="GEORGETTE">Georgette</option>
-                  <option value="ORGANZA">Organza</option>
-                  <option value="LINEN">Linen</option>
-                  <option value="CREPE">Crepe</option>
-                  <option value="SATIN">Satin</option>
-                </select>
-                <select
-                  value={form.craft}
-                  onChange={(event) =>
-                    updateField(
-                      "craft",
-                      event.target.value as ProductForm["craft"],
-                    )
-                  }
-                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-                >
-                  <option value="BANARASI">Banarasi</option>
-                  <option value="KANJEEVARAM">Kanjeevaram</option>
-                  <option value="BANDHANI">Bandhani</option>
-                  <option value="CHIKANKARI">Chikankari</option>
-                  <option value="PAITHANI">Paithani</option>
-                  <option value="PATOLA">Patola</option>
-                  <option value="JAMDANI">Jamdani</option>
-                  <option value="TUSSAR">Tussar</option>
-                </select>
+                <label className="grid gap-1 text-xs text-[#5c4a42]">
+                  Material
+                  <input
+                    type="text"
+                    value={form.fabric}
+                    onChange={(event) => updateField("fabric", event.target.value)}
+                    placeholder="Silk"
+                    required
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-[#5c4a42]">
+                  Saree category
+                  <input
+                    type="text"
+                    value={form.craft}
+                    onChange={(event) => updateField("craft", event.target.value)}
+                    placeholder="Banarasi"
+                    required
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+                  />
+                </label>
               </div>
               <textarea
                 value={form.description}
