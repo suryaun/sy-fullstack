@@ -56,6 +56,9 @@ type CategoryRelationRow = {
 };
 
 type PrismaClientLike = Prisma.TransactionClient | typeof prisma;
+type ProductAttributeKind = "MATERIAL" | "SAREE_CATEGORY";
+
+const PRODUCT_ATTRIBUTE_KINDS: ProductAttributeKind[] = ["MATERIAL", "SAREE_CATEGORY"];
 
 function normalizeProductAttribute(value: unknown): string | null {
   if (typeof value !== "string" || !value.trim()) {
@@ -63,6 +66,17 @@ function normalizeProductAttribute(value: unknown): string | null {
   }
 
   return value.trim();
+}
+
+function isProductAttributeKind(value: unknown): value is ProductAttributeKind {
+  return typeof value === "string" && PRODUCT_ATTRIBUTE_KINDS.includes(value as ProductAttributeKind);
+}
+
+function formatProductAttributes(attributes: Array<{ kind: string; name: string }>) {
+  return {
+    materials: attributes.filter((attribute) => attribute.kind === "MATERIAL").map((attribute) => attribute.name),
+    sareeCategories: attributes.filter((attribute) => attribute.kind === "SAREE_CATEGORY").map((attribute) => attribute.name)
+  };
 }
 
 const DEFAULT_CATEGORY_BLUEPRINT: CategorySeedNode[] = [
@@ -348,6 +362,44 @@ router.get("/categories", requireAdmin, async (_req, res) => {
   return res.json(buildCategoryTree(categories));
 });
 
+router.get("/product-attributes", requireAdmin, async (_req, res) => {
+  const attributes = await prisma.productAttribute.findMany({
+    orderBy: [{ kind: "asc" }, { name: "asc" }],
+    select: { kind: true, name: true }
+  });
+
+  return res.json(formatProductAttributes(attributes));
+});
+
+router.post("/product-attributes", requireAdmin, async (req, res) => {
+  const { kind, name } = req.body as { kind?: string; name?: string };
+  const normalizedName = normalizeProductAttribute(name);
+
+  if (!isProductAttributeKind(kind)) {
+    return res.status(400).json({ message: "Invalid product attribute type" });
+  }
+
+  if (!normalizedName) {
+    return res.status(400).json({ message: "Attribute name is required" });
+  }
+
+  const existing = await prisma.productAttribute.findFirst({
+    where: { kind, name: { equals: normalizedName, mode: "insensitive" } },
+    select: { kind: true, name: true }
+  });
+
+  if (existing) {
+    return res.status(409).json({ message: `${existing.name} already exists` });
+  }
+
+  const created = await prisma.productAttribute.create({
+    data: { kind, name: normalizedName },
+    select: { kind: true, name: true }
+  });
+
+  return res.status(201).json(created);
+});
+
 router.post("/categories", requireAdmin, async (req, res) => {
   const { name, parentId, sortOrder } = req.body as {
     name?: string;
@@ -440,6 +492,21 @@ router.post("/products", requireAdmin, async (req, res) => {
     return res.status(400).json({ message: "Material and saree category are required" });
   }
 
+  const [material, sareeCategory] = await Promise.all([
+    prisma.productAttribute.findFirst({
+      where: { kind: "MATERIAL", name: { equals: normalizedFabric, mode: "insensitive" } },
+      select: { name: true }
+    }),
+    prisma.productAttribute.findFirst({
+      where: { kind: "SAREE_CATEGORY", name: { equals: normalizedCraft, mode: "insensitive" } },
+      select: { name: true }
+    })
+  ]);
+
+  if (!material || !sareeCategory) {
+    return res.status(400).json({ message: "Select a material and saree category from General info" });
+  }
+
   const uploads = Array.isArray(imageUploads)
     ? (imageUploads as Array<{ imageUrl: string; imagePublicId?: string }>).filter((item) => item?.imageUrl)
     : [];
@@ -476,8 +543,8 @@ router.post("/products", requireAdmin, async (req, res) => {
       data: {
         name,
         description,
-        fabric: normalizedFabric,
-        craft: normalizedCraft,
+        fabric: material.name,
+        craft: sareeCategory.name,
         lengthInMeters,
         blouseIncluded,
         hasHandloomMark: Boolean(req.body.hasHandloomMark),

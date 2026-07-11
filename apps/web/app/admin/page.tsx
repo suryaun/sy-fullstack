@@ -141,7 +141,74 @@ type ColorForm = {
   isDefault: boolean;
 };
 
-type AdminTab = "overview" | "add-product" | "add-color" | "inventory" | "categories" | "pieces" | "orders";
+type ProductAttributes = {
+  materials: string[];
+  sareeCategories: string[];
+};
+
+type ProductAttributeKind = "MATERIAL" | "SAREE_CATEGORY";
+
+type AdminTab = "overview" | "add-product" | "add-color" | "inventory" | "general-info" | "categories" | "pieces" | "orders";
+
+function ProductAttributeManager({
+  title,
+  description,
+  kind,
+  values,
+  onCreate,
+}: {
+  title: string;
+  description: string;
+  kind: ProductAttributeKind;
+  values: string[];
+  onCreate: (kind: ProductAttributeKind, name: string) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!name.trim()) return;
+
+    try {
+      setSaving(true);
+      await onCreate(kind, name);
+      setName("");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+      <h2 className="font-semibold">{title}</h2>
+      <p className="mt-1 text-xs text-[#6b625b]">{description}</p>
+      <form onSubmit={submit} className="mt-3 flex gap-2">
+        <input
+          type="text"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder={`Add ${title.toLowerCase().slice(0, -1)}`}
+          className="min-w-0 flex-1 rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+        />
+        <button
+          type="submit"
+          disabled={saving || !name.trim()}
+          className="rounded-xl bg-wine px-4 text-xs font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-50"
+        >
+          {saving ? "..." : "Add"}
+        </button>
+      </form>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {values.map((value) => (
+          <span key={value} className="rounded-full border border-[#e4d9d0] bg-[#faf8f5] px-3 py-1 text-xs text-[#5c4a42]">
+            {value}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 function flattenCategoryTree(
   nodes: AdminCategoryNode[],
@@ -386,8 +453,13 @@ export default function AdminPage() {
   const previewUrlCacheRef = useRef<Map<File, string>>(new Map());
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [categories, setCategories] = useState<AdminCategoryNode[]>([]);
+  const [productAttributes, setProductAttributes] = useState<ProductAttributes>({
+    materials: [],
+    sareeCategories: [],
+  });
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingCategories, setLoadingCategories] = useState(true);
+  const [loadingProductAttributes, setLoadingProductAttributes] = useState(true);
   const [stockUpdatingId, setStockUpdatingId] = useState<string | null>(null);
   const [defaultUpdatingId, setDefaultUpdatingId] = useState<string | null>(
     null,
@@ -527,6 +599,8 @@ export default function AdminPage() {
       productImageFiles.length === 0 ||
       !form.name.trim() ||
       !form.description.trim() ||
+      !form.fabric ||
+      !form.craft ||
       !form.priceInInr ||
       Number(form.priceInInr) <= 0 ||
       Number(form.lengthInMeters) <= 0
@@ -686,6 +760,22 @@ export default function AdminPage() {
     setCategories(data);
   };
 
+  const loadProductAttributes = async () => {
+    const response = await fetch(`${ADMIN_PROXY_BASE}/product-attributes`);
+
+    if (!response.ok) {
+      throw new Error("Unable to load general product information");
+    }
+
+    const data = (await response.json()) as ProductAttributes;
+    setProductAttributes(data);
+    setForm((previous) => ({
+      ...previous,
+      fabric: data.materials.includes(previous.fabric) ? previous.fabric : (data.materials[0] ?? ""),
+      craft: data.sareeCategories.includes(previous.craft) ? previous.craft : (data.sareeCategories[0] ?? ""),
+    }));
+  };
+
   useEffect(() => {
     const bootstrapAndLoadProducts = async () => {
       const bootstrap = await fetch("/api/admin/bootstrap", {
@@ -696,12 +786,13 @@ export default function AdminPage() {
         const payload = await bootstrap.json().catch(() => ({}));
         setLoadingProducts(false);
         setLoadingCategories(false);
+        setLoadingProductAttributes(false);
         setStatus(payload.message ?? "Admin access denied");
         return;
       }
 
       try {
-        await Promise.all([loadProducts(), loadCategories()]);
+        await Promise.all([loadProducts(), loadCategories(), loadProductAttributes()]);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unable to load admin data";
@@ -709,6 +800,7 @@ export default function AdminPage() {
       } finally {
         setLoadingProducts(false);
         setLoadingCategories(false);
+        setLoadingProductAttributes(false);
       }
     };
 
@@ -1068,6 +1160,24 @@ export default function AdminPage() {
     } finally {
       setCategorySaving(false);
     }
+  };
+
+  const createProductAttribute = async (kind: ProductAttributeKind, name: string) => {
+    const response = await fetch(`${ADMIN_PROXY_BASE}/product-attributes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind, name }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      const message = payload.message ?? "Failed to add product information";
+      setStatus(message);
+      throw new Error(message);
+    }
+
+    await loadProductAttributes();
+    setStatus("General product information added");
   };
 
   const persistProductCategories = async (
@@ -1567,7 +1677,7 @@ export default function AdminPage() {
       </header>
 
       <nav className="rounded-2xl border border-[#e8ddcf] bg-white/80 p-2 shadow-sm backdrop-blur">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
           <button
             type="button"
             onClick={() => setActiveTab("overview")}
@@ -1644,6 +1754,17 @@ export default function AdminPage() {
             }`}
           >
             Categories
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("general-info")}
+            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              activeTab === "general-info"
+                ? "bg-wine text-white"
+                : "bg-[#f7f1e8] text-[#5b5149]"
+            }`}
+          >
+            General Info
           </button>
         </div>
       </nav>
@@ -1820,25 +1941,33 @@ export default function AdminPage() {
               <div className="grid grid-cols-2 gap-2">
                 <label className="grid gap-1 text-xs text-[#5c4a42]">
                   Material
-                  <input
-                    type="text"
+                  <select
                     value={form.fabric}
                     onChange={(event) => updateField("fabric", event.target.value)}
-                    placeholder="Silk"
                     required
-                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-                  />
+                    disabled={loadingProductAttributes}
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2 disabled:opacity-50"
+                  >
+                    <option value="">Select material</option>
+                    {productAttributes.materials.map((material) => (
+                      <option key={material} value={material}>{material}</option>
+                    ))}
+                  </select>
                 </label>
                 <label className="grid gap-1 text-xs text-[#5c4a42]">
                   Saree category
-                  <input
-                    type="text"
+                  <select
                     value={form.craft}
                     onChange={(event) => updateField("craft", event.target.value)}
-                    placeholder="Banarasi"
                     required
-                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-                  />
+                    disabled={loadingProductAttributes}
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2 disabled:opacity-50"
+                  >
+                    <option value="">Select saree category</option>
+                    {productAttributes.sareeCategories.map((sareeCategory) => (
+                      <option key={sareeCategory} value={sareeCategory}>{sareeCategory}</option>
+                    ))}
+                  </select>
                 </label>
               </div>
               <textarea
@@ -2180,6 +2309,25 @@ export default function AdminPage() {
                   {categorySaving ? "Saving..." : "Create Category"}
                 </button>
               </form>
+            </section>
+          ) : null}
+
+          {activeTab === "general-info" ? (
+            <section className="grid gap-4 lg:grid-cols-2">
+              <ProductAttributeManager
+                title="Materials"
+                description="Manage the material values available when adding a saree."
+                kind="MATERIAL"
+                values={productAttributes.materials}
+                onCreate={createProductAttribute}
+              />
+              <ProductAttributeManager
+                title="Saree categories"
+                description="Manage the weave or saree category values available when adding a saree."
+                kind="SAREE_CATEGORY"
+                values={productAttributes.sareeCategories}
+                onCreate={createProductAttribute}
+              />
             </section>
           ) : null}
         </div>
