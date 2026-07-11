@@ -2,10 +2,16 @@ import { prisma } from "./prisma.js";
 import { calculateItemGst, getHsnCode } from "./gst.js";
 import { allocatePieces } from "./sku.js";
 import { generateInvoiceNumber } from "./invoice.js";
+import { createShipmentForPaidOrder } from "./courier.js";
 
 type PaidResult = {
   orderId: string | null;
   transitionedToPaid: boolean;
+};
+
+type FailedResult = {
+  orderId: string | null;
+  transitionedToFailure: boolean;
 };
 
 export async function markOrderAsPaidByRazorpayOrderId(input: {
@@ -30,7 +36,7 @@ export async function markOrderAsPaidByRazorpayOrderId(input: {
     };
   }
 
-  return prisma.$transaction(async (tx) => {
+  const paidResult = await prisma.$transaction(async (tx) => {
     const order = await tx.order.findFirst({
       where: { razorpayOrderId: normalizedOrderId },
       include: {
@@ -217,4 +223,92 @@ export async function markOrderAsPaidByRazorpayOrderId(input: {
       transitionedToPaid: true
     };
   });
+
+  if (paidResult.orderId && paidResult.transitionedToPaid) {
+    try {
+      await createShipmentForPaidOrder(paidResult.orderId);
+    } catch (error) {
+      console.error("Shipment booking failed after payment", error);
+    }
+  }
+
+  return paidResult;
+}
+
+export async function markOrderAsFailedByRazorpayOrderId(input: {
+  razorpayOrderId: string;
+  status?: "FAILED" | "CANCELLED";
+  razorpayPaymentId?: string;
+}): Promise<FailedResult> {
+  const normalizedOrderId = input.razorpayOrderId.trim();
+  const normalizedPaymentId =
+    typeof input.razorpayPaymentId === "string" && input.razorpayPaymentId.trim()
+      ? input.razorpayPaymentId.trim()
+      : null;
+  const targetStatus = input.status === "CANCELLED" ? "CANCELLED" : "FAILED";
+
+  if (!normalizedOrderId) {
+    return {
+      orderId: null,
+      transitionedToFailure: false,
+    };
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const order = await tx.order.findFirst({
+      where: { razorpayOrderId: normalizedOrderId },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (!order) {
+      return {
+        orderId: null,
+        transitionedToFailure: false,
+      };
+    }
+
+    // Never downgrade a successfully paid order.
+    if (order.status === "PAID") {
+      return {
+        orderId: order.id,
+        transitionedToFailure: false,
+      };
+    }
+
+    const paymentFields = normalizedPaymentId
+      ? { razorpayPaymentId: normalizedPaymentId }
+      : {};
+
+    if (order.status === targetStatus) {
+      if (Object.keys(paymentFields).length > 0) {
+        await tx.order.update({
+          where: { id: order.id },
+          data: paymentFields,
+        });
+      }
+
+      return {
+        orderId: order.id,
+        transitionedToFailure: false,
+      };
+    }
+
+    await tx.order.update({
+      where: { id: order.id },
+      data: {
+        status: targetStatus,
+        ...paymentFields,
+      },
+    });
+
+    return {
+      orderId: order.id,
+      transitionedToFailure: true,
+    };
+  });
+
+  return result;
 }

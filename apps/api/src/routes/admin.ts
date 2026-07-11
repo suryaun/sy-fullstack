@@ -10,6 +10,7 @@ import { requireAdmin } from "../middleware/auth.js";
 import { getHsnCode, calculateItemGst } from "../lib/gst.js";
 import { generateColorSku, generatePieces, removePieces } from "../lib/sku.js";
 import { generateInvoiceNumber } from "../lib/invoice.js";
+import { createShipmentForPaidOrder } from "../lib/courier.js";
 
 const router = Router();
 const IMAGE_UPLOAD_MAX_BYTES = Number(process.env.IMAGE_UPLOAD_MAX_BYTES ?? 15 * 1024 * 1024);
@@ -74,6 +75,13 @@ const adminProductSelect = Prisma.validator<Prisma.ProductSelect>()({
   name: true,
   hidden: true,
   stockStatus: true,
+  instagramReelUrl: true,
+  packageType: true,
+  packageLengthCm: true,
+  packageWidthCm: true,
+  packageHeightCm: true,
+  weightGrams: true,
+  sourcePincode: true,
   images: {
     orderBy: { sortOrder: "asc" },
     select: {
@@ -461,7 +469,14 @@ router.post("/products", requireAdmin, async (req, res) => {
         hasHandloomMark: Boolean(req.body.hasHandloomMark),
         priceInPaise,
         imageUrl: coverImageUrl,
-        imagePublicId: coverImagePublicId
+        imagePublicId: coverImagePublicId,
+        instagramReelUrl: req.body.instagramReelUrl ?? null,
+        packageType: req.body.packageType ?? undefined,
+        packageLengthCm: req.body.packageLengthCm != null ? Number(req.body.packageLengthCm) : undefined,
+        packageWidthCm: req.body.packageWidthCm != null ? Number(req.body.packageWidthCm) : undefined,
+        packageHeightCm: req.body.packageHeightCm != null ? Number(req.body.packageHeightCm) : undefined,
+        weightGrams: req.body.weightGrams != null ? Number(req.body.weightGrams) : undefined,
+        sourcePincode: req.body.sourcePincode ?? undefined,
       }
     });
 
@@ -650,6 +665,63 @@ router.patch("/products/:id/images/reorder", requireAdmin, async (req, res) => {
   });
 
   return res.json({ success: true });
+});
+
+// Delete a single product gallery image (and its ImageKit asset).
+router.delete("/products/:id/images/:imageId", requireAdmin, async (req, res) => {
+  const productId = asSingle(req.params.id);
+  const imageId = asSingle(req.params.imageId);
+
+  if (!productId || !imageId) {
+    return res.status(400).json({ message: "Product id and image id are required" });
+  }
+
+  const image = await prisma.productImage.findFirst({
+    where: { id: imageId, productId },
+    select: { id: true, imagePublicId: true }
+  });
+
+  if (!image) {
+    return res.status(404).json({ message: "Image not found" });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.productImage.delete({ where: { id: imageId } });
+
+    // Re-normalize sortOrder so the gallery stays contiguous.
+    const remaining = await tx.productImage.findMany({
+      where: { productId },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true, imageUrl: true, imagePublicId: true }
+    });
+
+    await Promise.all(
+      remaining.map((item, index) =>
+        tx.productImage.update({ where: { id: item.id }, data: { sortOrder: index } })
+      )
+    );
+
+    // Keep the product cover pointing at the new first image (if any remain).
+    const firstImage = remaining[0];
+    if (firstImage) {
+      await tx.product.update({
+        where: { id: productId },
+        data: { imageUrl: firstImage.imageUrl, imagePublicId: firstImage.imagePublicId }
+      });
+    }
+  });
+
+  const imageCleanup = await deleteImageKitFiles([image.imagePublicId]);
+
+  return res.json({
+    message: "Image deleted",
+    deletedId: imageId,
+    images: {
+      attempted: imageCleanup.attempted,
+      removed: imageCleanup.deleted,
+      failed: imageCleanup.failed.length
+    }
+  });
 });
 
 router.post("/products/:id/colors", requireAdmin, async (req, res) => {
@@ -857,6 +929,143 @@ router.patch("/products/:id/colors/:colorId/images/reorder", requireAdmin, async
   return res.json({ success: true });
 });
 
+// Delete a single color image (and its ImageKit asset).
+router.delete("/products/:id/colors/:colorId/images/:imageId", requireAdmin, async (req, res) => {
+  const productId = asSingle(req.params.id);
+  const colorId = asSingle(req.params.colorId);
+  const imageId = asSingle(req.params.imageId);
+
+  if (!productId || !colorId || !imageId) {
+    return res.status(400).json({ message: "Product id, color id and image id are required" });
+  }
+
+  const image = await prisma.productColorImage.findFirst({
+    where: { id: imageId, productColor: { id: colorId, productId } },
+    select: { id: true, imagePublicId: true }
+  });
+
+  if (!image) {
+    return res.status(404).json({ message: "Image not found" });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.productColorImage.delete({ where: { id: imageId } });
+
+    const remaining = await tx.productColorImage.findMany({
+      where: { productColorId: colorId },
+      orderBy: { sortOrder: "asc" },
+      select: { id: true }
+    });
+
+    await Promise.all(
+      remaining.map((item, index) =>
+        tx.productColorImage.update({ where: { id: item.id }, data: { sortOrder: index } })
+      )
+    );
+  });
+
+  const imageCleanup = await deleteImageKitFiles([image.imagePublicId]);
+
+  return res.json({
+    message: "Image deleted",
+    deletedId: imageId,
+    images: {
+      attempted: imageCleanup.attempted,
+      removed: imageCleanup.deleted,
+      failed: imageCleanup.failed.length
+    }
+  });
+});
+
+// Delete a color variant entirely (and all its ImageKit assets).
+router.delete("/products/:id/colors/:colorId", requireAdmin, async (req, res) => {
+  const productId = asSingle(req.params.id);
+  const colorId = asSingle(req.params.colorId);
+
+  if (!productId || !colorId) {
+    return res.status(400).json({ message: "Product id and color id are required" });
+  }
+
+  const color = await prisma.productColor.findFirst({
+    where: { id: colorId, productId },
+    select: {
+      id: true,
+      name: true,
+      isDefault: true,
+      images: { select: { imagePublicId: true } }
+    }
+  });
+
+  if (!color) {
+    return res.status(404).json({ message: "Color not found" });
+  }
+
+  // A product must always retain at least one color.
+  const totalColors = await prisma.productColor.count({ where: { productId } });
+  if (totalColors <= 1) {
+    return res.status(400).json({
+      message: "Cannot delete the only color of a product. Delete the product instead."
+    });
+  }
+
+  // Block deletion when the color appears in any paid order (preserve history).
+  const paidOrderItems = await prisma.orderItem.findMany({
+    where: { productColorId: colorId, order: { status: "PAID" } },
+    select: { id: true }
+  });
+
+  if (paidOrderItems.length > 0) {
+    return res.status(400).json({
+      message: "Cannot delete a color with paid orders. Set its stock to 0 instead.",
+      paidOrderCount: paidOrderItems.length
+    });
+  }
+
+  const imageFileIds = color.images.map((item) => item.imagePublicId);
+
+  await prisma.$transaction(async (tx) => {
+    // ProductPiece uses onDelete: Restrict, so remove pieces explicitly first.
+    await tx.productPiece.deleteMany({ where: { productColorId: colorId } });
+    // Cascade removes ProductColorImage and BackInStockRequest rows.
+    await tx.productColor.delete({ where: { id: colorId } });
+
+    // Reassign the default flag if the removed color was the default.
+    if (color.isDefault) {
+      const nextDefault = await tx.productColor.findFirst({
+        where: { productId },
+        orderBy: { createdAt: "asc" },
+        select: { id: true }
+      });
+      if (nextDefault) {
+        await tx.productColor.update({ where: { id: nextDefault.id }, data: { isDefault: true } });
+      }
+    }
+
+    // Recompute the product stock status from the remaining colors.
+    const remaining = await tx.productColor.findMany({
+      where: { productId },
+      select: { stockQuantity: true }
+    });
+    const hasInStock = remaining.some((item) => item.stockQuantity > 0);
+    await tx.product.update({
+      where: { id: productId },
+      data: { stockStatus: hasInStock ? "IN_STOCK" : "SOLD_OUT" }
+    });
+  });
+
+  const imageCleanup = await deleteImageKitFiles(imageFileIds);
+
+  return res.json({
+    message: `Color "${color.name}" deleted`,
+    deletedId: colorId,
+    images: {
+      attempted: imageCleanup.attempted,
+      removed: imageCleanup.deleted,
+      failed: imageCleanup.failed.length
+    }
+  });
+});
+
 router.patch("/products/:id/colors/:colorId/default", requireAdmin, async (req, res) => {
   const productId = asSingle(req.params.id);
   const colorId = asSingle(req.params.colorId);
@@ -964,6 +1173,55 @@ router.patch("/products/:id/stock", requireAdmin, async (req, res) => {
   return res.json(product);
 });
 
+router.patch("/products/:id/reel", requireAdmin, async (req, res) => {
+  const id = asSingle(req.params.id);
+  const { instagramReelUrl } = req.body as { instagramReelUrl?: string | null };
+
+  if (!id) {
+    return res.status(400).json({ message: "Product id is required" });
+  }
+
+  const product = await prisma.product.update({
+    where: { id },
+    data: { instagramReelUrl: instagramReelUrl || null },
+    select: adminProductSelect
+  });
+
+  return res.json(mapAdminProduct(product));
+});
+
+router.patch("/products/:id/delivery", requireAdmin, async (req, res) => {
+  const id = asSingle(req.params.id);
+
+  if (!id) {
+    return res.status(400).json({ message: "Product id is required" });
+  }
+
+  const { packageType, packageLengthCm, packageWidthCm, packageHeightCm, weightGrams, sourcePincode } = req.body as {
+    packageType?: string;
+    packageLengthCm?: number;
+    packageWidthCm?: number;
+    packageHeightCm?: number;
+    weightGrams?: number;
+    sourcePincode?: string;
+  };
+
+  const product = await prisma.product.update({
+    where: { id },
+    data: {
+      ...(packageType != null && { packageType }),
+      ...(packageLengthCm != null && { packageLengthCm: Number(packageLengthCm) }),
+      ...(packageWidthCm != null && { packageWidthCm: Number(packageWidthCm) }),
+      ...(packageHeightCm != null && { packageHeightCm: Number(packageHeightCm) }),
+      ...(weightGrams != null && { weightGrams: Number(weightGrams) }),
+      ...(sourcePincode != null && { sourcePincode }),
+    },
+    select: adminProductSelect,
+  });
+
+  return res.json(mapAdminProduct(product));
+});
+
 async function uploadToImageKit(imageBuffer: Buffer, originalName: string) {
   const webpQuality = Number(process.env.IMAGE_UPLOAD_WEBP_QUALITY ?? 82);
   const optimized = await sharp(imageBuffer)
@@ -987,6 +1245,37 @@ async function uploadToImageKit(imageBuffer: Buffer, originalName: string) {
     imageUrl: result.url,
     imagePublicId: result.fileId
   };
+}
+
+// Best-effort removal of ImageKit assets by fileId. Never throws — the database
+// is the source of truth, so a cloud cleanup failure must not block a delete.
+async function deleteImageKitFiles(fileIds: Array<string | null | undefined>) {
+  const ids = [...new Set(fileIds.filter((id): id is string => Boolean(id && id.trim())))];
+  if (ids.length === 0) {
+    return { attempted: 0, deleted: 0, failed: [] as string[] };
+  }
+
+  if (!process.env.IMAGEKIT_PRIVATE_KEY) {
+    console.warn("[imagekit cleanup skipped] IMAGEKIT_PRIVATE_KEY is not configured");
+    return { attempted: ids.length, deleted: 0, failed: ids };
+  }
+
+  let deleted = 0;
+  const failed: string[] = [];
+
+  // ImageKit bulk delete accepts a maximum of 100 fileIds per request.
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    try {
+      const result = await imagekit.files.bulk.delete({ fileIds: chunk });
+      deleted += result.successfullyDeletedFileIds?.length ?? chunk.length;
+    } catch (error) {
+      console.error("[imagekit bulk delete failed]", error);
+      failed.push(...chunk);
+    }
+  }
+
+  return { attempted: ids.length, deleted, failed };
 }
 
 router.post("/upload/imagekit", requireAdmin, upload.single("image"), async (req, res) => {
@@ -1392,7 +1681,13 @@ router.delete("/products/:id", requireAdmin, async (req, res) => {
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, name: true }
+    select: {
+      id: true,
+      name: true,
+      imagePublicId: true,
+      images: { select: { imagePublicId: true } },
+      colors: { select: { images: { select: { imagePublicId: true } } } }
+    }
   });
 
   if (!product) {
@@ -1415,12 +1710,30 @@ router.delete("/products/:id", requireAdmin, async (req, res) => {
     });
   }
 
+  // Collect every ImageKit asset tied to the product (cover, gallery, color images).
+  const imageFileIds = [
+    product.imagePublicId,
+    ...product.images.map((image) => image.imagePublicId),
+    ...product.colors.flatMap((color) => color.images.map((image) => image.imagePublicId))
+  ];
+
   // Safe to delete: cascade will handle orphaned records.
   await prisma.product.delete({
     where: { id: productId }
   });
 
-  return res.json({ message: `Product "${product.name}" deleted`, deletedId: productId });
+  // Remove the now-orphaned assets from ImageKit (best-effort, after the DB delete).
+  const imageCleanup = await deleteImageKitFiles(imageFileIds);
+
+  return res.json({
+    message: `Product "${product.name}" deleted`,
+    deletedId: productId,
+    images: {
+      attempted: imageCleanup.attempted,
+      removed: imageCleanup.deleted,
+      failed: imageCleanup.failed.length
+    }
+  });
 });
 
 // ─── Bulk Restock ──────────────────────────────────────────────────────────────
@@ -1473,6 +1786,60 @@ router.post("/products/:id/colors/:colorId/restock", requireAdmin, async (req, r
     newStockQuantity: updated.stockQuantity,
     totalAdded: quantity
   });
+});
+
+// ── Retry shipment creation for a paid order ──────────────────────────────
+router.post("/orders/:id/retry-shipment", requireAdmin, async (req, res) => {
+  const orderId = asSingle(req.params.id);
+  if (!orderId) {
+    return res.status(400).json({ message: "Order id is required" });
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, status: true },
+  });
+
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+
+  if (order.status !== "PAID") {
+    return res.status(400).json({ message: `Order status is ${order.status}, shipment can only be created for PAID orders` });
+  }
+
+  try {
+    const shipments = await createShipmentForPaidOrder(orderId);
+    if (!shipments) {
+      return res.status(400).json({ message: "No courier provider configured or order is not eligible" });
+    }
+
+    const allBooked = shipments.every((s) => s.status === "BOOKED");
+    const anyFailed = shipments.some((s) => s.status === "FAILED");
+
+    return res.json({
+      message: allBooked
+        ? `${shipments.length} shipment(s) created successfully`
+        : anyFailed
+          ? "One or more shipments failed"
+          : "Shipment creation in progress",
+      shipments: shipments.map((s) => ({
+        id: s.id,
+        status: s.status,
+        provider: s.provider,
+        sourcePincode: s.sourcePincode,
+        providerShipmentId: s.providerShipmentId,
+        providerWaybill: s.providerWaybill,
+        providerReference: s.providerReference,
+        failureMessage: s.failureMessage,
+        bookedAt: s.bookedAt,
+      })),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Shipment creation failed";
+    console.error("[admin] retry-shipment error for order", orderId, error);
+    return res.status(502).json({ message });
+  }
 });
 
 export default router;
