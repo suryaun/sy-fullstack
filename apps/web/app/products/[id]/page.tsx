@@ -18,6 +18,7 @@ type ApiProductColor = {
   isDefault: boolean;
   stockQuantity: number;
   priceInPaise?: number | null;
+  originalPriceInPaise?: number | null;
   images: ApiProductColorImage[];
 };
 
@@ -26,10 +27,14 @@ type ApiProductDetail = {
   name: string;
   description: string;
   fabric: string;
+  work: string;
+  occasion: string;
+  care: string;
   categoryLabel: string | null;
   lengthInMeters: number;
   blouseIncluded: boolean;
   priceInPaise: number;
+  originalPriceInPaise?: number | null;
   stockStatus: "IN_STOCK" | "SOLD_OUT";
   images?: ApiProductImage[];
   colors: ApiProductColor[];

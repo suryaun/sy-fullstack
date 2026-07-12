@@ -26,6 +26,7 @@ type ProductColor = {
   isDefault: boolean;
   stockQuantity: number;
   priceInPaise?: number | null;
+  originalPriceInPaise?: number | null;
   images: ProductColorImage[];
 };
 
@@ -39,6 +40,7 @@ type ProductDetailView = {
   lengthInMeters: number;
   blouseIncluded: boolean;
   priceInPaise: number;
+  originalPriceInPaise?: number | null;
   stockStatus: "IN_STOCK" | "SOLD_OUT";
   care?: string;
   work?: string;
@@ -165,6 +167,12 @@ export default function ProductDetailClient({ product }: Props) {
   }, [isImageViewerOpen]);
 
   const effectivePrice = selectedColor?.priceInPaise ?? product.priceInPaise;
+  const originalPrice =
+    selectedColor?.originalPriceInPaise ?? product.originalPriceInPaise;
+  const discountPercent =
+    originalPrice && originalPrice > effectivePrice
+      ? Math.round(((originalPrice - effectivePrice) / originalPrice) * 100)
+      : null;
   const inStock =
     product.stockStatus === "IN_STOCK" &&
     (selectedColor?.stockQuantity ?? 0) > 0;
@@ -623,8 +631,25 @@ export default function ProductDetailClient({ product }: Props) {
             {product.categoryLabel}
           </p>
           <h1 className="font-serif text-4xl leading-tight text-ink sm:text-5xl">{product.name}</h1>
-          <p className="font-serif text-2xl text-[#5c4e44]">
-            ₹{(effectivePrice / 100).toLocaleString("en-IN")}
+          <div className="flex items-baseline gap-3">
+            {originalPrice && originalPrice > effectivePrice ? (
+              <span className="font-sans text-lg tabular-nums text-[#85766b] line-through">
+                ₹{(originalPrice / 100).toLocaleString("en-IN")}
+              </span>
+            ) : null}
+            <p className="font-sans text-2xl font-bold tabular-nums text-ink">
+              ₹{(effectivePrice / 100).toLocaleString("en-IN")}
+            </p>
+            {discountPercent ? (
+              <span className="text-xs font-semibold tabular-nums text-[#9a2f2f]">
+                {discountPercent}% off
+              </span>
+            ) : null}
+          </div>
+          <p className="flex flex-wrap gap-x-2 gap-y-1 text-xs text-[#6b625b]">
+            <span>Inclusive of all taxes</span>
+            <span aria-hidden>·</span>
+            <span className="font-medium text-[#4f6a52]">Free delivery across India</span>
           </p>
           <p className="text-sm leading-relaxed text-[#5c4a42]">
             {product.longDescription ?? product.description}

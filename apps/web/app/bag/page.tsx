@@ -16,7 +16,7 @@ type ApiBagProduct = {
   blouseIncluded: boolean;
   priceInPaise: number;
   stockStatus: "IN_STOCK" | "SOLD_OUT";
-  imageUrl: string;
+  imageUrl: string | null;
   images?: Array<{ imageUrl: string; sortOrder?: number }>;
   colors: Array<{
     id: string;
@@ -82,7 +82,8 @@ export default function BagPage() {
           const imageUrl =
             selectedColor.images?.[0]?.imageUrl ??
             product.images?.[0]?.imageUrl ??
-            product.imageUrl;
+            product.imageUrl ??
+            "/seere-yaana-logo.png";
           const unitPrice = selectedColor.priceInPaise ?? product.priceInPaise;
 
           return [{

@@ -90,7 +90,7 @@ function mapOrderForResponse(order: {
     product: {
       id: string;
       name: string;
-      imageUrl: string;
+      imageUrl: string | null;
     };
     productColor: {
       id: string;

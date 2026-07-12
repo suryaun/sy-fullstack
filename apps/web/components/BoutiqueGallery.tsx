@@ -47,14 +47,6 @@ function resolveSwatchColor(code: string | null | undefined, seed: string) {
   return SWATCH_FALLBACKS[paletteIndex];
 }
 
-function conciseDescription(text: string, maxLength = 92) {
-  if (text.length <= maxLength) {
-    return text;
-  }
-
-  return `${text.slice(0, maxLength).trimEnd()}...`;
-}
-
 export default function BoutiqueGallery({ products, categories }: Props) {
   const { addToCart, toggleWishlist, isWishlisted, cartItems, cartCount } =
     useStore();
@@ -64,7 +56,6 @@ export default function BoutiqueGallery({ products, categories }: Props) {
     useState<string | null>(null);
   const [isCategoryPanelOpen, setIsCategoryPanelOpen] = useState(true);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<string[]>([]);
-  const [selectedColorByProductId, setSelectedColorByProductId] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const syncFromLocation = () => {
@@ -167,7 +158,7 @@ export default function BoutiqueGallery({ products, categories }: Props) {
       const eligibleCategoryIds =
         descendantsByCategoryId.get(categoryId) ?? new Set([categoryId]);
 
-      let productCount = 0;
+      let itemCount = 0;
       for (const product of products) {
         const productCategoryIds = (product.categories ?? []).map(
           (category) => category.id,
@@ -177,11 +168,11 @@ export default function BoutiqueGallery({ products, categories }: Props) {
             eligibleCategoryIds.has(productCategoryId),
           )
         ) {
-          productCount += 1;
+          itemCount += product.availableColors?.length ?? 0;
         }
       }
 
-      productCountByCategoryId.set(categoryId, productCount);
+      productCountByCategoryId.set(categoryId, itemCount);
     }
 
     return {
@@ -348,7 +339,24 @@ export default function BoutiqueGallery({ products, categories }: Props) {
     );
   }, [categoryFilterData.descendantsByCategoryId, products, selectedCategoryId]);
 
-  const totalCategoryProducts = products.length;
+  const displayedItems = useMemo(
+    () =>
+      filteredProducts.flatMap((product) =>
+        (product.availableColors ?? [])
+          .filter((color) => color.id)
+          .map((color) => ({ product, color })),
+      ).sort(
+        (left, right) =>
+          Number((left.color.stockQuantity ?? 0) === 0) -
+          Number((right.color.stockQuantity ?? 0) === 0),
+      ),
+    [filteredProducts],
+  );
+
+  const totalCategoryProducts = products.reduce(
+    (count, product) => count + (product.availableColors?.length ?? 0),
+    0,
+  );
 
   const expandedCategoryIdSet = useMemo(
     () => new Set(expandedCategoryIds),
@@ -504,80 +512,45 @@ export default function BoutiqueGallery({ products, categories }: Props) {
         </aside>
 
         <div>
-          {filteredProducts.length === 0 ? (
+          {displayedItems.length === 0 ? (
             <div className="rounded border border-dashed border-[#e4d9d0] bg-[#faf8f5] p-10 text-center text-sm text-[#5c4a42]">
               No pieces found for this category.
             </div>
           ) : null}
 
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
-        {filteredProducts.map((product, index) => {
+        {displayedItems.map(({ product, color }, index) => {
         const validImages = product.images.filter(
           (image) => typeof image === "string" && image.trim().length > 0,
         );
-        const swatches =
-          product.availableColors && product.availableColors.length > 0
-            ? product.availableColors.map((color) => ({
-                id: color.id ?? `${product.id}-${color.name}`,
-                name: color.name,
-                colorCode: resolveSwatchColor(
-                  color.colorCode,
-                  `${product.id}-${color.name}`,
-                ),
-              }))
-            : [
-                {
-                  id: `${product.id}-tone`,
-                  name: product.colorTone,
-                  colorCode: resolveSwatchColor(null, `${product.id}-${product.colorTone}`),
-                },
-              ];
-
-        const quickAddColorId =
-          selectedColorByProductId[product.id] ??
-          product.availableColors?.find(
-            (color) =>
-              color.isDefault &&
-              color.id &&
-              (color.stockQuantity ?? 0) > 0,
-          )?.id ??
-          product.availableColors?.find(
-            (color) => color.id && (color.stockQuantity ?? 0) > 0,
-          )?.id ??
-          product.availableColors?.find((color) => color.isDefault && color.id)
-            ?.id ??
-          product.availableColors?.find((color) => color.id)?.id;
-        const quickAddColor = product.availableColors?.find(
-          (color) => color.id === quickAddColorId,
-        );
-        
-        // Use color-specific images if available, otherwise use product images
-        const imagesToUse = quickAddColor?.images && quickAddColor.images.length > 0
-          ? quickAddColor.images
+        const quickAddColorId = color.id;
+        const imagesToUse = color.images && color.images.length > 0
+          ? color.images
           : validImages;
         const primaryImage = imagesToUse[0] ?? FALLBACK_IMAGE;
         const secondaryImage = imagesToUse[1] ?? primaryImage;
         
-        const quickAddStock = quickAddColor?.stockQuantity ?? 0;
-        const bagQuantity = quickAddColorId
-          ? (cartItems.find(
-              (item) =>
-                item.productId === product.id && item.colorId === quickAddColorId,
-            )?.quantity ?? 0)
-          : 0;
+        const quickAddStock = color.stockQuantity ?? 0;
+        const bagQuantity = cartItems.find(
+          (item) =>
+            item.productId === product.id && item.colorId === quickAddColorId,
+        )?.quantity ?? 0;
         const isQuickAddAvailable =
           product.stockStatus === "IN_STOCK" && quickAddStock > 0;
+        const isSoldOut = quickAddStock === 0;
         const isVariantWishlisted = isWishlisted(product.id, quickAddColorId);
-        const categoryNames = (product.categories ?? [])
-          .slice()
-          .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
-          .map((category) => category.name)
-          .slice(0, 2);
+        const effectivePrice = color.priceInPaise ?? product.priceInPaise;
+        const originalPrice =
+          color.originalPriceInPaise ?? product.originalPriceInPaise;
+        const discountPercent =
+          originalPrice && originalPrice > effectivePrice
+            ? Math.round(((originalPrice - effectivePrice) / originalPrice) * 100)
+            : null;
 
         return (
           <Link
-            key={product.id}
-            href={`/products/${product.id}${quickAddColorId ? `?color=${quickAddColorId}` : ''}`}
+            key={quickAddColorId}
+            href={`/products/${product.id}?color=${quickAddColorId}`}
             className="apple-tile group animate-rise overflow-hidden rounded-lg transition-all duration-500 hover:-translate-y-1 block"
             style={{ animationDelay: `${index * 80}ms` }}
             aria-label={`View details for ${product.name}`}
@@ -588,7 +561,7 @@ export default function BoutiqueGallery({ products, categories }: Props) {
                 alt={product.name}
                 width={1200}
                 height={1600}
-                className="absolute inset-0 h-full w-full object-cover transition-all duration-700 ease-out group-hover:scale-[1.03] group-hover:opacity-0"
+                className={`absolute inset-0 h-full w-full object-cover transition-all duration-700 ease-out group-hover:scale-[1.03] group-hover:opacity-0 ${isSoldOut ? "brightness-[0.7] saturate-[0.65]" : ""}`}
                 sizes="(max-width: 768px) 100vw, 33vw"
                 unoptimized
                 priority={index < 2}
@@ -598,74 +571,62 @@ export default function BoutiqueGallery({ products, categories }: Props) {
                 alt={`${product.name} alternate view`}
                 width={1200}
                 height={1600}
-                className="absolute inset-0 h-full w-full scale-[1.04] object-cover opacity-0 transition-all duration-700 ease-out group-hover:scale-100 group-hover:opacity-100"
+                className={`absolute inset-0 h-full w-full scale-[1.04] object-cover opacity-0 transition-all duration-700 ease-out group-hover:scale-100 group-hover:opacity-100 ${isSoldOut ? "brightness-[0.7] saturate-[0.65]" : ""}`}
                 sizes="(max-width: 768px) 100vw, 33vw"
                 unoptimized
                 aria-hidden
               />
+              {isSoldOut ? (
+                <span className="absolute left-4 top-4 rounded-sm bg-ink/90 px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-[#faf8f5]">
+                  Sold out
+                </span>
+              ) : null}
             </article>
 
             <div className="space-y-3 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-[#7a6050]">
-                {product.fabric}{product.categoryLabel ? ` · ${product.categoryLabel}` : ""}
-              </p>
-              {categoryNames.length > 0 ? (
-                <p className="text-xs uppercase tracking-[0.18em] text-[#8a6e60]">
-                  {categoryNames.join(" · ")}
-                </p>
-              ) : null}
               <h3 className="font-serif text-2xl leading-tight text-ink">
                 {product.name}
               </h3>
-              <p className="min-h-[2.5rem] text-sm leading-relaxed text-[#5c4a42]">
-                {conciseDescription(product.description)}
-              </p>
-
-              <div className="flex items-center justify-between">
-                <p className="font-serif text-xl text-ink">
-                  ₹{(product.priceInPaise / 100).toLocaleString("en-IN")}
+              {product.categoryLabel ? (
+                <p className="text-xs uppercase tracking-[0.14em] text-[#7a6050]">
+                  {product.categoryLabel}
                 </p>
+              ) : null}
+              <div className="flex items-baseline gap-2">
+                {originalPrice && originalPrice > effectivePrice ? (
+                  <span className="font-sans text-sm tabular-nums text-[#8a7560] line-through">
+                    ₹{(originalPrice / 100).toLocaleString("en-IN")}
+                  </span>
+                ) : null}
+                <p className="font-sans text-xl font-bold tabular-nums text-ink">
+                  ₹{(effectivePrice / 100).toLocaleString("en-IN")}
+                </p>
+                {discountPercent ? (
+                  <span className="text-xs font-semibold tabular-nums text-[#9a2f2f]">
+                    {discountPercent}% off
+                  </span>
+                ) : null}
               </div>
-
-              <p className="text-xs uppercase tracking-[0.18em] text-[#7a6050]">
-                Blouse {product.blouseIncluded ? "Included" : "Optional"}
+              <p className="flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-[#6b625b]">
+                <span>Inclusive of all taxes</span>
+                <span aria-hidden>·</span>
+                <span className="font-medium text-[#4f6a52]">Free delivery across India</span>
               </p>
 
-              <div className="flex flex-wrap gap-2 pt-1">
-                <div className="flex flex-col gap-2 w-full">
-                  <p className="text-[10px] uppercase tracking-[0.14em] text-[#7a6050] font-medium">Select Colour</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {product.availableColors?.map((color) => {
-                      const isSelected = color.id === quickAddColorId;
-                      const isAvailable = (color.stockQuantity ?? 0) > 0;
-                      return (
-                        <button
-                          key={color.id}
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (color.id) {
-                              setSelectedColorByProductId(prev => ({ ...prev, [product.id]: color.id! }));
-                            }
-                          }}
-                          title={color.name}
-                          className={`relative h-6 w-6 rounded-full border-2 transition ${ isSelected
-                            ? "border-ink shadow-md scale-110"
-                            : "border-white/50 hover:border-[#d0d0d0]"
-                          } ${!isAvailable ? "opacity-40" : "cursor-pointer"}`}
-                          style={{
-                            backgroundColor: resolveSwatchColor(
-                              color.colorCode,
-                              `${product.id}-${color.name}`,
-                            ),
-                          }}
-                          aria-label={`${color.name}${isAvailable ? "" : " (out of stock)"}`}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <span
+                  className="h-5 w-5 rounded-full border border-[#d7c9b7]"
+                  style={{
+                    backgroundColor: resolveSwatchColor(
+                      color.colorCode,
+                      `${product.id}-${color.name}`,
+                    ),
+                  }}
+                  aria-hidden
+                />
+                <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-[#7a6050]">
+                  {color.name}
+                </p>
 
                 <button
                   type="button"

@@ -27,16 +27,11 @@ export function getHsnCode(fabric: string): string {
   return map[fabric.toUpperCase()] ?? "6299";
 }
 
-// GST rate for textiles (Notification 1/2017-CT(Rate)):
-//   - Handloom-certified → 0 % (Notification 2/2017-CT(Rate))
-//   - < ₹1,000/piece     → 5 %
-//   - ≥ ₹1,000/piece     → 12 %
-export function getGstRatePercent(
-  unitPriceInPaise: number,
-  hasHandloomMark: boolean
-): number {
-  if (hasHandloomMark) return 0;
-  return unitPriceInPaise < 100_000 ? 5 : 12;
+// GST rate for textiles used across the storefront and invoices.
+export const DEFAULT_GST_RATE_PERCENT = 5;
+
+export function getGstRatePercent(): number {
+  return DEFAULT_GST_RATE_PERCENT;
 }
 
 export type ItemGstResult = {
@@ -51,25 +46,12 @@ export type ItemGstResult = {
 // Back-calculates taxable value and splits into CGST/SGST (intrastate)
 // or IGST (interstate) depending on the buyer's delivery state.
 export function calculateItemGst(params: {
-  unitPriceInPaise: number; // per-piece price, used for rate determination
   lineTotalInPaise: number; // qty × unitPrice (inclusive of GST)
-  hasHandloomMark: boolean;
   deliveryState: string;
 }): ItemGstResult {
-  const { unitPriceInPaise, lineTotalInPaise, hasHandloomMark, deliveryState } =
-    params;
+  const { lineTotalInPaise, deliveryState } = params;
 
-  const gstRate = getGstRatePercent(unitPriceInPaise, hasHandloomMark);
-
-  if (gstRate === 0) {
-    return {
-      gstRatePercent: 0,
-      taxableAmountInPaise: lineTotalInPaise,
-      cgstInPaise: 0,
-      sgstInPaise: 0,
-      igstInPaise: 0,
-    };
-  }
+  const gstRate = getGstRatePercent();
 
   // Reverse-calculate: MRP = taxable × (1 + rate/100)
   const taxableAmountInPaise = Math.round(lineTotalInPaise / (1 + gstRate / 100));

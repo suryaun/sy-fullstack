@@ -5,6 +5,7 @@ export type CatalogProductColorOption = {
   isDefault?: boolean;
   stockQuantity?: number;
   priceInPaise?: number | null;
+  originalPriceInPaise?: number | null;
   images?: string[];
 };
 
@@ -37,6 +38,7 @@ export type CatalogProduct = {
   occasion: string;
   blouseIncluded: boolean;
   priceInPaise: number;
+  originalPriceInPaise?: number | null;
   stockStatus: "IN_STOCK" | "SOLD_OUT";
   categories?: CatalogProductCategory[];
 };

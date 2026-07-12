@@ -18,7 +18,7 @@ type ApiCheckoutProduct = {
   blouseIncluded: boolean;
   priceInPaise: number;
   stockStatus: "IN_STOCK" | "SOLD_OUT";
-  imageUrl: string;
+  imageUrl: string | null;
   images?: Array<{ imageUrl: string; sortOrder?: number }>;
   colors: Array<{
     id: string;
