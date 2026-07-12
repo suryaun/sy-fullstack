@@ -607,7 +607,7 @@ export default function BoutiqueGallery({ products, categories }: Props) {
 
             <div className="space-y-3 p-5">
               <p className="text-xs uppercase tracking-[0.22em] text-[#7a6050]">
-                {product.fabric}{product.craft ? ` · ${product.craft}` : ""}
+                {product.fabric}{product.categoryLabel ? ` · ${product.categoryLabel}` : ""}
               </p>
               {categoryNames.length > 0 ? (
                 <p className="text-xs uppercase tracking-[0.18em] text-[#8a6e60]">

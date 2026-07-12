@@ -7,7 +7,7 @@ type ApiHomeProduct = {
   name: string;
   description: string;
   fabric: string;
-  craft: string;
+  categoryLabel: string | null;
   lengthInMeters: number;
   blouseIncluded: boolean;
   priceInPaise: number;
@@ -101,7 +101,7 @@ async function getHomepageProducts(): Promise<CatalogProduct[]> {
         longDescription: product.description,
         images: imageUrls,
         fabric: product.fabric,
-        craft: product.craft,
+        categoryLabel: product.categoryLabel,
         lengthInMeters: product.lengthInMeters,
         weight: "-",
         work: "Curated handcrafted detailing",

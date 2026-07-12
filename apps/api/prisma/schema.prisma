@@ -98,17 +98,6 @@ model Category {
   @@unique([parentId, slug])
 }
 
-model ProductAttribute {
-  id        String   @id @default(cuid())
-  kind      String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([kind, name])
-  @@index([kind])
-}
-
 model ProductCategory {
   productId         String
   categoryId        String

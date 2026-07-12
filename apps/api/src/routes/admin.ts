@@ -55,29 +55,11 @@ type CategoryRelationRow = {
   parentId: string | null;
 };
 
+type CategoryCraftRow = CategoryRelationRow & {
+  name: string;
+};
+
 type PrismaClientLike = Prisma.TransactionClient | typeof prisma;
-type ProductAttributeKind = "MATERIAL" | "SAREE_CATEGORY";
-
-const PRODUCT_ATTRIBUTE_KINDS: ProductAttributeKind[] = ["MATERIAL", "SAREE_CATEGORY"];
-
-function normalizeProductAttribute(value: unknown): string | null {
-  if (typeof value !== "string" || !value.trim()) {
-    return null;
-  }
-
-  return value.trim();
-}
-
-function isProductAttributeKind(value: unknown): value is ProductAttributeKind {
-  return typeof value === "string" && PRODUCT_ATTRIBUTE_KINDS.includes(value as ProductAttributeKind);
-}
-
-function formatProductAttributes(attributes: Array<{ kind: string; name: string }>) {
-  return {
-    materials: attributes.filter((attribute) => attribute.kind === "MATERIAL").map((attribute) => attribute.name),
-    sareeCategories: attributes.filter((attribute) => attribute.kind === "SAREE_CATEGORY").map((attribute) => attribute.name)
-  };
-}
 
 const DEFAULT_CATEGORY_BLUEPRINT: CategorySeedNode[] = [
   {
@@ -215,6 +197,27 @@ function resolveCategoryClosureWithAncestors(
     invalidCategoryId: null,
     categoryIds: [...closedSelection]
   };
+}
+
+function buildCraftFromCategorySelection(
+  selectedCategoryIds: string[],
+  allCategories: CategoryCraftRow[]
+) {
+  const categoryById = new Map(allCategories.map((category) => [category.id, category]));
+
+  const paths = selectedCategoryIds.map((categoryId) => {
+    const path: string[] = [];
+    let cursor = categoryById.get(categoryId);
+
+    while (cursor) {
+      path.unshift(cursor.name);
+      cursor = cursor.parentId ? categoryById.get(cursor.parentId) : undefined;
+    }
+
+    return path;
+  });
+
+  return paths.sort((left, right) => right.length - left.length)[0]?.join(" / ") ?? null;
 }
 
 function slugifyCategoryName(name: string) {
@@ -362,44 +365,6 @@ router.get("/categories", requireAdmin, async (_req, res) => {
   return res.json(buildCategoryTree(categories));
 });
 
-router.get("/product-attributes", requireAdmin, async (_req, res) => {
-  const attributes = await prisma.productAttribute.findMany({
-    orderBy: [{ kind: "asc" }, { name: "asc" }],
-    select: { kind: true, name: true }
-  });
-
-  return res.json(formatProductAttributes(attributes));
-});
-
-router.post("/product-attributes", requireAdmin, async (req, res) => {
-  const { kind, name } = req.body as { kind?: string; name?: string };
-  const normalizedName = normalizeProductAttribute(name);
-
-  if (!isProductAttributeKind(kind)) {
-    return res.status(400).json({ message: "Invalid product attribute type" });
-  }
-
-  if (!normalizedName) {
-    return res.status(400).json({ message: "Attribute name is required" });
-  }
-
-  const existing = await prisma.productAttribute.findFirst({
-    where: { kind, name: { equals: normalizedName, mode: "insensitive" } },
-    select: { kind: true, name: true }
-  });
-
-  if (existing) {
-    return res.status(409).json({ message: `${existing.name} already exists` });
-  }
-
-  const created = await prisma.productAttribute.create({
-    data: { kind, name: normalizedName },
-    select: { kind: true, name: true }
-  });
-
-  return res.status(201).json(created);
-});
-
 router.post("/categories", requireAdmin, async (req, res) => {
   const { name, parentId, sortOrder } = req.body as {
     name?: string;
@@ -459,6 +424,37 @@ router.post("/categories", requireAdmin, async (req, res) => {
   return res.status(201).json(created);
 });
 
+router.delete("/categories/:id", requireAdmin, async (req, res) => {
+  const categoryId = asSingle(req.params.id);
+  if (!categoryId) {
+    return res.status(400).json({ message: "Category id is required" });
+  }
+
+  const category = await prisma.category.findUnique({
+    where: { id: categoryId },
+    select: {
+      id: true,
+      children: { select: { id: true }, take: 1 },
+      productCategories: { select: { productId: true }, take: 1 }
+    }
+  });
+
+  if (!category) {
+    return res.status(404).json({ message: "Category not found" });
+  }
+
+  if (category.children.length > 0) {
+    return res.status(409).json({ message: "Delete sub-categories before deleting this category" });
+  }
+
+  if (category.productCategories.length > 0) {
+    return res.status(409).json({ message: "This category is still assigned to one or more products" });
+  }
+
+  await prisma.category.delete({ where: { id: category.id } });
+  return res.status(204).send();
+});
+
 router.get("/products", requireAdmin, async (_req, res) => {
   const products = await prisma.product.findMany({
     orderBy: { createdAt: "desc" },
@@ -472,39 +468,22 @@ router.post("/products", requireAdmin, async (req, res) => {
   const {
     name,
     description,
-    fabric,
-    craft,
     lengthInMeters,
     blouseIncluded,
     priceInPaise,
     imageUrl,
     imagePublicId,
     imageUploads,
-    categoryIds
+    categoryIds,
+    fabricCategoryId
   } = req.body;
 
   const normalizedCategoryIds = normalizeCategoryIds(categoryIds);
-  const normalizedFabric = normalizeProductAttribute(fabric);
-  const normalizedCraft = normalizeProductAttribute(craft);
+  const normalizedFabricCategoryId = typeof fabricCategoryId === "string" ? fabricCategoryId.trim() : "";
   let hierarchicalCategoryIds = normalizedCategoryIds;
 
-  if (!normalizedFabric || !normalizedCraft) {
-    return res.status(400).json({ message: "Material and saree category are required" });
-  }
-
-  const [material, sareeCategory] = await Promise.all([
-    prisma.productAttribute.findFirst({
-      where: { kind: "MATERIAL", name: { equals: normalizedFabric, mode: "insensitive" } },
-      select: { name: true }
-    }),
-    prisma.productAttribute.findFirst({
-      where: { kind: "SAREE_CATEGORY", name: { equals: normalizedCraft, mode: "insensitive" } },
-      select: { name: true }
-    })
-  ]);
-
-  if (!material || !sareeCategory) {
-    return res.status(400).json({ message: "Select a material and saree category from General info" });
+  if (normalizedCategoryIds.length === 0) {
+    return res.status(400).json({ message: "At least one category is required" });
   }
 
   const uploads = Array.isArray(imageUploads)
@@ -518,24 +497,33 @@ router.post("/products", requireAdmin, async (req, res) => {
     return res.status(400).json({ message: "At least one product image is required" });
   }
 
-  if (normalizedCategoryIds.length > 0) {
-    const allCategories = await prisma.category.findMany({
-      select: {
-        id: true,
-        parentId: true
-      }
-    });
-
-    const resolvedCategoryClosure = resolveCategoryClosureWithAncestors(
-      normalizedCategoryIds,
-      allCategories
-    );
-
-    if (resolvedCategoryClosure.invalidCategoryId) {
-      return res.status(400).json({ message: "One or more category ids are invalid" });
+  const allCategories = await prisma.category.findMany({
+    select: {
+      id: true,
+      name: true,
+      parentId: true
     }
+  });
 
-    hierarchicalCategoryIds = resolvedCategoryClosure.categoryIds;
+  const resolvedCategoryClosure = resolveCategoryClosureWithAncestors(
+    normalizedCategoryIds,
+    allCategories
+  );
+
+  if (resolvedCategoryClosure.invalidCategoryId) {
+    return res.status(400).json({ message: "One or more category ids are invalid" });
+  }
+
+  hierarchicalCategoryIds = resolvedCategoryClosure.categoryIds;
+  const craft = buildCraftFromCategorySelection(normalizedCategoryIds, allCategories);
+  const fabric = allCategories.find((category) => category.id === normalizedFabricCategoryId)?.name ?? null;
+
+  if (!normalizedFabricCategoryId || !hierarchicalCategoryIds.includes(normalizedFabricCategoryId) || !fabric) {
+    return res.status(400).json({ message: "Select a fabric category from the selected hierarchy" });
+  }
+
+  if (!craft) {
+    return res.status(400).json({ message: "Select a valid category" });
   }
 
   const createdProduct = await prisma.$transaction(async (tx) => {
@@ -543,8 +531,8 @@ router.post("/products", requireAdmin, async (req, res) => {
       data: {
         name,
         description,
-        fabric: material.name,
-        craft: sareeCategory.name,
+        fabric,
+        craft,
         lengthInMeters,
         blouseIncluded,
         hasHandloomMark: Boolean(req.body.hasHandloomMark),
@@ -604,7 +592,6 @@ router.patch("/products/:id/categories", requireAdmin, async (req, res) => {
   }
 
   const normalizedCategoryIds = normalizeCategoryIds(req.body?.categoryIds);
-  let hierarchicalCategoryIds = normalizedCategoryIds;
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
@@ -615,37 +602,39 @@ router.patch("/products/:id/categories", requireAdmin, async (req, res) => {
     return res.status(404).json({ message: "Product not found" });
   }
 
-  if (normalizedCategoryIds.length > 0) {
-    const allCategories = await prisma.category.findMany({
-      select: {
-        id: true,
-        parentId: true
-      }
-    });
-
-    const resolvedCategoryClosure = resolveCategoryClosureWithAncestors(
-      normalizedCategoryIds,
-      allCategories
-    );
-
-    if (resolvedCategoryClosure.invalidCategoryId) {
-      return res.status(400).json({ message: "One or more category ids are invalid" });
-    }
-
-    hierarchicalCategoryIds = resolvedCategoryClosure.categoryIds;
+  if (normalizedCategoryIds.length === 0) {
+    return res.status(400).json({ message: "At least one category is required" });
   }
+
+  const allCategories = await prisma.category.findMany({
+    select: {
+      id: true,
+      name: true,
+      parentId: true
+    }
+  });
+
+  const resolvedCategoryClosure = resolveCategoryClosureWithAncestors(
+    normalizedCategoryIds,
+    allCategories
+  );
+
+  if (resolvedCategoryClosure.invalidCategoryId) {
+    return res.status(400).json({ message: "One or more category ids are invalid" });
+  }
+
+  const craft = buildCraftFromCategorySelection(normalizedCategoryIds, allCategories);
 
   await prisma.$transaction(async (tx) => {
     await tx.productCategory.deleteMany({ where: { productId } });
 
-    if (hierarchicalCategoryIds.length > 0) {
-      await tx.productCategory.createMany({
-        data: hierarchicalCategoryIds.map((categoryId) => ({
-          productId,
-          categoryId
-        }))
-      });
-    }
+    await tx.productCategory.createMany({
+      data: resolvedCategoryClosure.categoryIds.map((categoryId) => ({
+        productId,
+        categoryId
+      }))
+    });
+    await tx.product.update({ where: { id: productId }, data: { craft } });
   });
 
   const updated = await prisma.product.findUnique({
@@ -847,7 +836,7 @@ router.post("/products/:id/colors", requireAdmin, async (req, res) => {
   }
 
   const sku = generateColorSku({
-    craft: product.craft,
+    categoryLabel: product.craft,
     productSequenceNumber: product.sequenceNumber,
     colorName: name.trim(),
     borderColorName: borderColorName?.trim() ?? null

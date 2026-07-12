@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { LoaderCircle, Trash2 } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import ColorPickerInput from "@/components/ColorPickerInput";
 
 type StockState = "IN_STOCK" | "SOLD_OUT";
@@ -122,8 +124,7 @@ type AdminProduct = {
 type ProductForm = {
   name: string;
   description: string;
-  fabric: string;
-  craft: string;
+  fabricCategoryId: string;
   lengthInMeters: string;
   blouseIncluded: boolean;
   hasHandloomMark: boolean;
@@ -141,73 +142,21 @@ type ColorForm = {
   isDefault: boolean;
 };
 
-type ProductAttributes = {
-  materials: string[];
-  sareeCategories: string[];
-};
+type AdminTab = "overview" | "add-product" | "add-color" | "inventory" | "general-info" | "pieces" | "orders";
 
-type ProductAttributeKind = "MATERIAL" | "SAREE_CATEGORY";
+const ADMIN_TABS: AdminTab[] = [
+  "overview",
+  "add-product",
+  "add-color",
+  "inventory",
+  "general-info",
+  "pieces",
+  "orders",
+];
 
-type AdminTab = "overview" | "add-product" | "add-color" | "inventory" | "general-info" | "categories" | "pieces" | "orders";
-
-function ProductAttributeManager({
-  title,
-  description,
-  kind,
-  values,
-  onCreate,
-}: {
-  title: string;
-  description: string;
-  kind: ProductAttributeKind;
-  values: string[];
-  onCreate: (kind: ProductAttributeKind, name: string) => Promise<void>;
-}) {
-  const [name, setName] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!name.trim()) return;
-
-    try {
-      setSaving(true);
-      await onCreate(kind, name);
-      setName("");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
-      <h2 className="font-semibold">{title}</h2>
-      <p className="mt-1 text-xs text-[#6b625b]">{description}</p>
-      <form onSubmit={submit} className="mt-3 flex gap-2">
-        <input
-          type="text"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder={`Add ${title.toLowerCase().slice(0, -1)}`}
-          className="min-w-0 flex-1 rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
-        />
-        <button
-          type="submit"
-          disabled={saving || !name.trim()}
-          className="rounded-xl bg-wine px-4 text-xs font-semibold uppercase tracking-[0.1em] text-white disabled:opacity-50"
-        >
-          {saving ? "..." : "Add"}
-        </button>
-      </form>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {values.map((value) => (
-          <span key={value} className="rounded-full border border-[#e4d9d0] bg-[#faf8f5] px-3 py-1 text-xs text-[#5c4a42]">
-            {value}
-          </span>
-        ))}
-      </div>
-    </section>
-  );
+function getAdminTabFromPathname(pathname: string): AdminTab {
+  const tab = pathname.split("/")[2];
+  return ADMIN_TABS.includes(tab as AdminTab) ? (tab as AdminTab) : "overview";
 }
 
 function flattenCategoryTree(
@@ -450,21 +399,19 @@ async function optimizeImageForUpload(file: File) {
 }
 
 export default function AdminPage() {
+  const pathname = usePathname();
+  const router = useRouter();
   const previewUrlCacheRef = useRef<Map<File, string>>(new Map());
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [categories, setCategories] = useState<AdminCategoryNode[]>([]);
-  const [productAttributes, setProductAttributes] = useState<ProductAttributes>({
-    materials: [],
-    sareeCategories: [],
-  });
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingCategories, setLoadingCategories] = useState(true);
-  const [loadingProductAttributes, setLoadingProductAttributes] = useState(true);
   const [stockUpdatingId, setStockUpdatingId] = useState<string | null>(null);
   const [defaultUpdatingId, setDefaultUpdatingId] = useState<string | null>(
     null,
   );
   const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryDeletingId, setCategoryDeletingId] = useState<string | null>(null);
   const [productCategorySavingId, setProductCategorySavingId] = useState<
     string | null
   >(null);
@@ -494,8 +441,7 @@ export default function AdminPage() {
   const [form, setForm] = useState<ProductForm>({
     name: "",
     description: "",
-    fabric: "Silk",
-    craft: "Banarasi",
+    fabricCategoryId: "",
     lengthInMeters: "5.5",
     blouseIncluded: true,
     hasHandloomMark: false,
@@ -511,7 +457,7 @@ export default function AdminPage() {
     stockQuantity: "0",
     isDefault: false,
   });
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => getAdminTabFromPathname(pathname));
   const [inventoryQuery, setInventoryQuery] = useState("");
   const [inventoryFilter, setInventoryFilter] = useState<
     "ALL" | "IN_STOCK" | "SOLD_OUT"
@@ -523,6 +469,14 @@ export default function AdminPage() {
     name: "",
     parentId: "",
   });
+
+  useEffect(() => {
+    setActiveTab(getAdminTabFromPathname(pathname));
+  }, [pathname]);
+
+  const selectAdminTab = (tab: AdminTab) => {
+    router.push(tab === "overview" ? "/admin" : `/admin/${tab}`);
+  };
 
   // Pieces tab state
   const [piecesProductId, setPiecesProductId] = useState("");
@@ -593,14 +547,31 @@ export default function AdminPage() {
     return result;
   }, [flatCategories]);
 
+  const selectedFabricCategories = useMemo(() => {
+    return form.categoryIds
+      .map((id) => {
+        const category = flatCategories.find((item) => item.id === id);
+        if (!category) {
+          return null;
+        }
+
+        return {
+          id,
+          label: categoryPathById.get(id) ?? category.name,
+        };
+      })
+      .filter((category): category is { id: string; label: string } => category !== null)
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [categoryPathById, flatCategories, form.categoryIds]);
+
   const isSubmitDisabled = useMemo(() => {
     return (
       saving ||
       productImageFiles.length === 0 ||
       !form.name.trim() ||
       !form.description.trim() ||
-      !form.fabric ||
-      !form.craft ||
+      form.categoryIds.length === 0 ||
+      !form.fabricCategoryId ||
       !form.priceInInr ||
       Number(form.priceInInr) <= 0 ||
       Number(form.lengthInMeters) <= 0
@@ -760,22 +731,6 @@ export default function AdminPage() {
     setCategories(data);
   };
 
-  const loadProductAttributes = async () => {
-    const response = await fetch(`${ADMIN_PROXY_BASE}/product-attributes`);
-
-    if (!response.ok) {
-      throw new Error("Unable to load general product information");
-    }
-
-    const data = (await response.json()) as ProductAttributes;
-    setProductAttributes(data);
-    setForm((previous) => ({
-      ...previous,
-      fabric: data.materials.includes(previous.fabric) ? previous.fabric : (data.materials[0] ?? ""),
-      craft: data.sareeCategories.includes(previous.craft) ? previous.craft : (data.sareeCategories[0] ?? ""),
-    }));
-  };
-
   useEffect(() => {
     const bootstrapAndLoadProducts = async () => {
       const bootstrap = await fetch("/api/admin/bootstrap", {
@@ -786,13 +741,12 @@ export default function AdminPage() {
         const payload = await bootstrap.json().catch(() => ({}));
         setLoadingProducts(false);
         setLoadingCategories(false);
-        setLoadingProductAttributes(false);
         setStatus(payload.message ?? "Admin access denied");
         return;
       }
 
       try {
-        await Promise.all([loadProducts(), loadCategories(), loadProductAttributes()]);
+        await Promise.all([loadProducts(), loadCategories()]);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unable to load admin data";
@@ -800,7 +754,6 @@ export default function AdminPage() {
       } finally {
         setLoadingProducts(false);
         setLoadingCategories(false);
-        setLoadingProductAttributes(false);
       }
     };
 
@@ -1162,22 +1115,27 @@ export default function AdminPage() {
     }
   };
 
-  const createProductAttribute = async (kind: ProductAttributeKind, name: string) => {
-    const response = await fetch(`${ADMIN_PROXY_BASE}/product-attributes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, name }),
-    });
+  const deleteCategory = async (category: FlatCategoryOption) => {
+    if (!window.confirm(`Delete ${category.name}? This cannot be undone.`)) return;
 
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      const message = payload.message ?? "Failed to add product information";
-      setStatus(message);
-      throw new Error(message);
+    try {
+      setCategoryDeletingId(category.id);
+      const response = await fetch(`${ADMIN_PROXY_BASE}/categories/${category.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to delete category");
+      }
+
+      await loadCategories();
+      setStatus("Category deleted");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to delete category");
+    } finally {
+      setCategoryDeletingId(null);
     }
-
-    await loadProductAttributes();
-    setStatus("General product information added");
   };
 
   const persistProductCategories = async (
@@ -1224,9 +1182,7 @@ export default function AdminPage() {
     const ancestorIds = categoryHierarchyMaps.ancestorIdsById.get(categoryId) ?? [];
     const descendantIds = categoryHierarchyMaps.descendantIdsById.get(categoryId) ?? [];
 
-    updateField(
-      "categoryIds",
-      (() => {
+    const nextCategoryIds = (() => {
         const next = new Set(form.categoryIds);
 
         if (checked) {
@@ -1249,8 +1205,15 @@ export default function AdminPage() {
         }
 
         return [...next];
-      })(),
-    );
+      })();
+
+    setForm((previous) => ({
+      ...previous,
+      categoryIds: nextCategoryIds,
+      fabricCategoryId: nextCategoryIds.includes(previous.fabricCategoryId)
+        ? previous.fabricCategoryId
+        : "",
+    }));
   };
 
   const toggleInventoryProductCategory = (
@@ -1310,8 +1273,7 @@ export default function AdminPage() {
         body: JSON.stringify({
           name: form.name.trim(),
           description: form.description.trim(),
-          fabric: form.fabric,
-          craft: form.craft,
+          fabricCategoryId: form.fabricCategoryId,
           lengthInMeters: Number(form.lengthInMeters),
           blouseIncluded: form.blouseIncluded,
           hasHandloomMark: form.hasHandloomMark,
@@ -1337,6 +1299,7 @@ export default function AdminPage() {
         ...prev,
         name: "",
         description: "",
+        fabricCategoryId: "",
         priceInInr: "",
         categoryIds: [],
       }));
@@ -1668,7 +1631,7 @@ export default function AdminPage() {
   };
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 px-4 pb-24 pt-8 sm:px-6 lg:px-8">
+    <main className="mx-auto max-w-[1600px] space-y-6 px-4 pb-24 pt-8 sm:px-6 lg:px-8">
       <header className="space-y-1">
         <h1 className="font-serif text-4xl text-ink">Admin Dashboard</h1>
         <p className="text-sm text-[#6b625b]">
@@ -1680,7 +1643,7 @@ export default function AdminPage() {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
           <button
             type="button"
-            onClick={() => setActiveTab("overview")}
+            onClick={() => selectAdminTab("overview")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "overview"
                 ? "bg-wine text-white"
@@ -1691,7 +1654,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("add-product")}
+            onClick={() => selectAdminTab("add-product")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "add-product"
                 ? "bg-wine text-white"
@@ -1702,7 +1665,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("add-color")}
+            onClick={() => selectAdminTab("add-color")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "add-color"
                 ? "bg-wine text-white"
@@ -1713,7 +1676,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("inventory")}
+            onClick={() => selectAdminTab("inventory")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "inventory"
                 ? "bg-wine text-white"
@@ -1724,7 +1687,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("pieces")}
+            onClick={() => selectAdminTab("pieces")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "pieces"
                 ? "bg-wine text-white"
@@ -1735,7 +1698,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("orders")}
+            onClick={() => selectAdminTab("orders")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "orders"
                 ? "bg-wine text-white"
@@ -1746,18 +1709,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("categories")}
-            className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
-              activeTab === "categories"
-                ? "bg-wine text-white"
-                : "bg-[#f7f1e8] text-[#5b5149]"
-            }`}
-          >
-            Categories
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("general-info")}
+            onClick={() => selectAdminTab("general-info")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "general-info"
                 ? "bg-wine text-white"
@@ -1805,7 +1757,7 @@ export default function AdminPage() {
             </p>
             <button
               type="button"
-              onClick={() => setActiveTab("inventory")}
+              onClick={() => selectAdminTab("inventory")}
               className="mt-3 rounded-full bg-wine px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white"
             >
               Open Inventory
@@ -1815,8 +1767,8 @@ export default function AdminPage() {
       ) : null}
 
       {activeTab !== "overview" ? (
-      <div className="grid gap-6 lg:grid-cols-[minmax(320px,420px)_1fr] lg:items-start">
-        <div className="space-y-6 lg:sticky lg:top-6">
+      <div className="w-full space-y-6">
+        <div className="space-y-6">
           {activeTab === "add-product" ? (
           <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
             <h2 className="font-semibold">Add Item</h2>
@@ -1830,17 +1782,17 @@ export default function AdminPage() {
               />
               <div className="space-y-2 rounded-xl border border-[#e8ddcf] bg-[#fcf8f2] p-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#5b5149]">
-                  Categories (optional)
+                  Categories
                 </p>
                 <p className="text-[11px] text-[#6b625b]">
-                  Selecting a sub-category auto-selects all parents. Unselecting a parent removes its sub-categories.
+                  Select at least one category. Selecting a sub-category auto-selects all parents. Unselecting a parent removes its sub-categories.
                 </p>
                 {loadingCategories ? (
                   <p className="text-xs text-[#6b625b]">Loading categories...</p>
                 ) : null}
                 {!loadingCategories && flatCategories.length === 0 ? (
                   <p className="text-xs text-[#6b625b]">
-                    No categories yet. Create one in the Categories tab.
+                    No categories yet. Create one in General Info.
                   </p>
                 ) : null}
                 {!loadingCategories && flatCategories.length > 0 ? (
@@ -1850,6 +1802,39 @@ export default function AdminPage() {
                       selectedCategoryIds={form.categoryIds}
                       onToggle={toggleDraftCategory}
                     />
+                  </div>
+                ) : null}
+                {selectedFabricCategories.length > 0 ? (
+                  <div className="space-y-2 border-t border-[#eadfce] pt-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#5c4a42]">
+                      Selected Category Hierarchy
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedFabricCategories.map((category) => (
+                        <span
+                          key={category.id}
+                          className="rounded-full border border-[#e4d9d0] bg-white px-2.5 py-1 text-[11px] text-[#5c4a42]"
+                        >
+                          {category.label}
+                        </span>
+                      ))}
+                    </div>
+                    <label className="grid gap-1 text-xs text-[#5c4a42]">
+                      Fabric category
+                      <select
+                        value={form.fabricCategoryId}
+                        onChange={(event) => updateField("fabricCategoryId", event.target.value)}
+                        required
+                        className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+                      >
+                        <option value="">Select from the hierarchy</option>
+                        {selectedFabricCategories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 ) : null}
               </div>
@@ -1938,38 +1923,6 @@ export default function AdminPage() {
                   })}
                 </div>
               ) : null}
-              <div className="grid grid-cols-2 gap-2">
-                <label className="grid gap-1 text-xs text-[#5c4a42]">
-                  Material
-                  <select
-                    value={form.fabric}
-                    onChange={(event) => updateField("fabric", event.target.value)}
-                    required
-                    disabled={loadingProductAttributes}
-                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2 disabled:opacity-50"
-                  >
-                    <option value="">Select material</option>
-                    {productAttributes.materials.map((material) => (
-                      <option key={material} value={material}>{material}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="grid gap-1 text-xs text-[#5c4a42]">
-                  Saree category
-                  <select
-                    value={form.craft}
-                    onChange={(event) => updateField("craft", event.target.value)}
-                    required
-                    disabled={loadingProductAttributes}
-                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2 disabled:opacity-50"
-                  >
-                    <option value="">Select saree category</option>
-                    {productAttributes.sareeCategories.map((sareeCategory) => (
-                      <option key={sareeCategory} value={sareeCategory}>{sareeCategory}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
               <textarea
                 value={form.description}
                 onChange={(event) =>
@@ -2264,70 +2217,92 @@ export default function AdminPage() {
           </section>
           ) : null}
 
-          {activeTab === "categories" ? (
-            <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
-              <h2 className="font-semibold">Create Category</h2>
-              <p className="mt-1 text-xs text-[#6b625b]">
-                Build one or many levels. Products can be uncategorized or mapped
-                to multiple categories.
-              </p>
-              <form onSubmit={createCategory} className="mt-3 space-y-3 text-sm">
-                <input
-                  type="text"
-                  value={categoryForm.name}
-                  onChange={(event) =>
-                    setCategoryForm((prev) => ({
-                      ...prev,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="Category name (e.g., Ilkal Sarees)"
-                  className="w-full rounded-xl border border-[#d7c9b7] p-2"
-                />
-                <select
-                  value={categoryForm.parentId}
-                  onChange={(event) =>
-                    setCategoryForm((prev) => ({
-                      ...prev,
-                      parentId: event.target.value,
-                    }))
-                  }
-                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-                >
-                  <option value="">No parent (root category)</option>
-                  {flatCategories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {`${"\u00A0\u00A0".repeat(category.depth)}${category.name}`}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  disabled={categorySaving}
-                  className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  {categorySaving ? "Saving..." : "Create Category"}
-                </button>
-              </form>
-            </section>
-          ) : null}
-
           {activeTab === "general-info" ? (
-            <section className="grid gap-4 lg:grid-cols-2">
-              <ProductAttributeManager
-                title="Materials"
-                description="Manage the material values available when adding a saree."
-                kind="MATERIAL"
-                values={productAttributes.materials}
-                onCreate={createProductAttribute}
-              />
-              <ProductAttributeManager
-                title="Saree categories"
-                description="Manage the weave or saree category values available when adding a saree."
-                kind="SAREE_CATEGORY"
-                values={productAttributes.sareeCategories}
-                onCreate={createProductAttribute}
-              />
+            <section className="mx-auto w-full max-w-5xl">
+              <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+                <h2 className="font-semibold">Categories</h2>
+                <p className="mt-1 text-xs text-[#6b625b]">
+                  Build the hierarchy used to classify products.
+                </p>
+                <form onSubmit={createCategory} className="mt-4 space-y-3 text-sm">
+                  <input
+                    type="text"
+                    value={categoryForm.name}
+                    onChange={(event) =>
+                      setCategoryForm((prev) => ({
+                        ...prev,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Category name (e.g., Ilkal Sarees)"
+                    className="w-full rounded-xl border border-[#d7c9b7] p-2"
+                  />
+                  <select
+                    value={categoryForm.parentId}
+                    onChange={(event) =>
+                      setCategoryForm((prev) => ({
+                        ...prev,
+                        parentId: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+                  >
+                    <option value="">No parent (root category)</option>
+                    {flatCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {`${"\u00A0\u00A0".repeat(category.depth)}${category.name}`}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={categorySaving}
+                    className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {categorySaving ? "Saving..." : "Create Category"}
+                  </button>
+                </form>
+                <div className="mt-5 border-t border-[#eee5dc] pt-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-[#5c4a42]">
+                    Category Hierarchy
+                  </h3>
+                  {loadingCategories ? (
+                    <p className="mt-3 text-xs text-[#6b625b]">Loading categories...</p>
+                  ) : null}
+                  {!loadingCategories && categories.length === 0 ? (
+                    <p className="mt-3 text-xs text-[#6b625b]">No categories yet.</p>
+                  ) : null}
+                  {!loadingCategories && categories.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      {flatCategories.map((category) => (
+                        <div
+                          key={category.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-[#efe4d7] bg-[#fcf8f2] px-3 py-2 text-sm text-[#5b5149]"
+                          style={{ marginLeft: `${category.depth * 16}px` }}
+                        >
+                          <span className="min-w-0 break-words">
+                            {categoryPathById.get(category.id) ?? category.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void deleteCategory(category)}
+                            disabled={categoryDeletingId === category.id}
+                            aria-label={`Delete ${category.name}`}
+                            title={`Delete ${category.name}`}
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            {categoryDeletingId === category.id ? (
+                              <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+                            ) : (
+                              <Trash2 aria-hidden="true" className="size-4" />
+                            )}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
             </section>
           ) : null}
         </div>
@@ -3221,32 +3196,6 @@ export default function AdminPage() {
           </section>
         ) : null}
 
-        {activeTab === "categories" ? (
-          <section className="space-y-2">
-            <h2 className="font-semibold">Category Hierarchy</h2>
-            {loadingCategories ? (
-              <p className="text-sm text-[#6b625b]">Loading categories...</p>
-            ) : null}
-            {!loadingCategories && categories.length === 0 ? (
-              <p className="rounded-xl border border-[#e8ddcf] bg-white px-3 py-2 text-sm text-[#6b625b]">
-                No categories yet.
-              </p>
-            ) : null}
-            {!loadingCategories && categories.length > 0 ? (
-              <div className="space-y-2 rounded-2xl border border-[#e8ddcf] bg-white p-3">
-                {flatCategories.map((category) => (
-                  <div
-                    key={category.id}
-                    className="rounded-lg border border-[#efe4d7] bg-[#fcf8f2] px-3 py-2 text-sm text-[#5b5149]"
-                    style={{ marginLeft: `${category.depth * 16}px` }}
-                  >
-                    {categoryPathById.get(category.id) ?? category.name}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </section>
-        ) : null}
       </div>
       ) : null}
 

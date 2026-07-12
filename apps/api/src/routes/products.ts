@@ -7,7 +7,6 @@ const router = Router();
 
 // Relevance weights for the "you may also like" recommender.
 const RELATED_CATEGORY_WEIGHT = 5;
-const RELATED_CRAFT_WEIGHT = 3;
 const RELATED_FABRIC_WEIGHT = 2;
 const RELATED_PRICE_WEIGHT = 2;
 const RELATED_IN_STOCK_WEIGHT = 1;
@@ -21,7 +20,6 @@ const productListSelect = Prisma.validator<Prisma.ProductSelect>()({
   name: true,
   description: true,
   fabric: true,
-  craft: true,
   lengthInMeters: true,
   blouseIncluded: true,
   priceInPaise: true,
@@ -74,7 +72,6 @@ const productDetailSelect = Prisma.validator<Prisma.ProductSelect>()({
   name: true,
   description: true,
   fabric: true,
-  craft: true,
   lengthInMeters: true,
   blouseIncluded: true,
   priceInPaise: true,
@@ -131,19 +128,40 @@ function mapCategoriesForResponse(productCategories: Array<{ category: { id: str
     .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
 }
 
+function buildCategoryLabel(categories: CategoryListItem[]) {
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const paths = categories.map((category) => {
+    const path: string[] = [];
+    let cursor: CategoryListItem | undefined = category;
+
+    while (cursor) {
+      path.unshift(cursor.name);
+      cursor = cursor.parentId ? categoryById.get(cursor.parentId) : undefined;
+    }
+
+    return path;
+  });
+
+  return paths.sort((left, right) => right.length - left.length)[0]?.join(" / ") ?? null;
+}
+
 function mapProductListItem(product: ProductListRow) {
   const { productCategories, ...rest } = product;
+  const categories = mapCategoriesForResponse(productCategories);
   return {
     ...rest,
-    categories: mapCategoriesForResponse(productCategories)
+    categories,
+    categoryLabel: buildCategoryLabel(categories)
   };
 }
 
 function mapProductDetailItem(product: ProductDetailRow) {
   const { productCategories, ...rest } = product;
+  const categories = mapCategoriesForResponse(productCategories);
   return {
     ...rest,
-    categories: mapCategoriesForResponse(productCategories)
+    categories,
+    categoryLabel: buildCategoryLabel(categories)
   };
 }
 
@@ -297,7 +315,6 @@ router.get("/:id/related", async (req, res) => {
     select: {
       id: true,
       hidden: true,
-      craft: true,
       fabric: true,
       priceInPaise: true,
       productCategories: { select: { categoryId: true } }
@@ -311,9 +328,8 @@ router.get("/:id/related", async (req, res) => {
   const categoryIds = current.productCategories.map((item) => item.categoryId);
   const categoryIdSet = new Set(categoryIds);
 
-  // Pre-filter candidates to products that share a category, craft, or fabric.
+  // Pre-filter candidates to products that share a category or fabric.
   const candidateFilters: Prisma.ProductWhereInput[] = [
-    { craft: current.craft },
     { fabric: current.fabric }
   ];
   if (categoryIds.length > 0) {
@@ -340,7 +356,6 @@ router.get("/:id/related", async (req, res) => {
         0
       );
       let score = sharedCategories * RELATED_CATEGORY_WEIGHT;
-      if (candidate.craft === current.craft) score += RELATED_CRAFT_WEIGHT;
       if (candidate.fabric === current.fabric) score += RELATED_FABRIC_WEIGHT;
       if (candidate.priceInPaise >= lowerPrice && candidate.priceInPaise <= upperPrice) {
         score += RELATED_PRICE_WEIGHT;
