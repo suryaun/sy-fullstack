@@ -35,7 +35,7 @@ type ProductDetailView = {
   description: string;
   longDescription?: string;
   fabric: string;
-  craft: string;
+  categoryLabel: string | null;
   lengthInMeters: number;
   blouseIncluded: boolean;
   priceInPaise: number;
@@ -620,7 +620,7 @@ export default function ProductDetailClient({ product }: Props) {
 
         <div className="space-y-5">
           <p className="text-xs uppercase tracking-[0.3em] text-[#7a6050]">
-            {product.craft}
+            {product.categoryLabel}
           </p>
           <h1 className="font-serif text-4xl leading-tight text-ink sm:text-5xl">{product.name}</h1>
           <p className="font-serif text-2xl text-[#5c4e44]">
@@ -657,7 +657,7 @@ export default function ProductDetailClient({ product }: Props) {
           <div className="rounded border border-[#e4d9d0] bg-[#faf8f5] p-5 text-sm leading-relaxed text-[#4e4038]">
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
             <p><span className="font-medium text-[#5c4e44]">Fabric</span> &mdash; {product.fabric}</p>
-            <p><span className="font-medium text-[#5c4e44]">Craft</span> &mdash; {product.craft}</p>
+            <p><span className="font-medium text-[#5c4e44]">Category</span> &mdash; {product.categoryLabel ?? "Uncategorized"}</p>
             <p><span className="font-medium text-[#5c4e44]">Work</span> &mdash; {product.work ?? "Handcrafted"}</p>
             <p><span className="font-medium text-[#5c4e44]">Length</span> &mdash; {product.lengthInMeters}m</p>
             <p><span className="font-medium text-[#5c4e44]">Blouse</span> &mdash; {product.blouseIncluded ? "Included" : "Optional"}</p>

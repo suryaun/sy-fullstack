@@ -27,7 +27,7 @@ export type CatalogProduct = {
   longDescription: string;
   images: string[];
   fabric: string;
-  craft: string;
+  categoryLabel: string | null;
   lengthInMeters: number;
   weight: string;
   work: string;

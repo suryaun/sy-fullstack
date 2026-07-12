@@ -11,7 +11,7 @@ type ApiBagProduct = {
   name: string;
   description: string;
   fabric: string;
-  craft: string;
+  categoryLabel: string | null;
   lengthInMeters: number;
   blouseIncluded: boolean;
   priceInPaise: number;

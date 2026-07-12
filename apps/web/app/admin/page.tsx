@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import { LoaderCircle, Trash2 } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import ColorPickerInput from "@/components/ColorPickerInput";
 
 type StockState = "IN_STOCK" | "SOLD_OUT";
@@ -122,24 +124,7 @@ type AdminProduct = {
 type ProductForm = {
   name: string;
   description: string;
-  fabric:
-    | "SILK"
-    | "CHIFFON"
-    | "COTTON"
-    | "GEORGETTE"
-    | "ORGANZA"
-    | "LINEN"
-    | "CREPE"
-    | "SATIN";
-  craft:
-    | "BANARASI"
-    | "KANJEEVARAM"
-    | "BANDHANI"
-    | "CHIKANKARI"
-    | "PAITHANI"
-    | "PATOLA"
-    | "JAMDANI"
-    | "TUSSAR";
+  fabricCategoryId: string;
   lengthInMeters: string;
   blouseIncluded: boolean;
   hasHandloomMark: boolean;
@@ -157,7 +142,22 @@ type ColorForm = {
   isDefault: boolean;
 };
 
-type AdminTab = "overview" | "add-product" | "add-color" | "inventory" | "categories" | "pieces" | "orders";
+type AdminTab = "overview" | "add-product" | "add-color" | "inventory" | "general-info" | "pieces" | "orders";
+
+const ADMIN_TABS: AdminTab[] = [
+  "overview",
+  "add-product",
+  "add-color",
+  "inventory",
+  "general-info",
+  "pieces",
+  "orders",
+];
+
+function getAdminTabFromPathname(pathname: string): AdminTab {
+  const tab = pathname.split("/")[2];
+  return ADMIN_TABS.includes(tab as AdminTab) ? (tab as AdminTab) : "overview";
+}
 
 function flattenCategoryTree(
   nodes: AdminCategoryNode[],
@@ -399,6 +399,8 @@ async function optimizeImageForUpload(file: File) {
 }
 
 export default function AdminPage() {
+  const pathname = usePathname();
+  const router = useRouter();
   const previewUrlCacheRef = useRef<Map<File, string>>(new Map());
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [categories, setCategories] = useState<AdminCategoryNode[]>([]);
@@ -409,6 +411,7 @@ export default function AdminPage() {
     null,
   );
   const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryDeletingId, setCategoryDeletingId] = useState<string | null>(null);
   const [productCategorySavingId, setProductCategorySavingId] = useState<
     string | null
   >(null);
@@ -438,8 +441,7 @@ export default function AdminPage() {
   const [form, setForm] = useState<ProductForm>({
     name: "",
     description: "",
-    fabric: "SILK",
-    craft: "BANARASI",
+    fabricCategoryId: "",
     lengthInMeters: "5.5",
     blouseIncluded: true,
     hasHandloomMark: false,
@@ -455,7 +457,7 @@ export default function AdminPage() {
     stockQuantity: "0",
     isDefault: false,
   });
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [activeTab, setActiveTab] = useState<AdminTab>(() => getAdminTabFromPathname(pathname));
   const [inventoryQuery, setInventoryQuery] = useState("");
   const [inventoryFilter, setInventoryFilter] = useState<
     "ALL" | "IN_STOCK" | "SOLD_OUT"
@@ -467,6 +469,14 @@ export default function AdminPage() {
     name: "",
     parentId: "",
   });
+
+  useEffect(() => {
+    setActiveTab(getAdminTabFromPathname(pathname));
+  }, [pathname]);
+
+  const selectAdminTab = (tab: AdminTab) => {
+    router.push(tab === "overview" ? "/admin" : `/admin/${tab}`);
+  };
 
   // Pieces tab state
   const [piecesProductId, setPiecesProductId] = useState("");
@@ -537,12 +547,31 @@ export default function AdminPage() {
     return result;
   }, [flatCategories]);
 
+  const selectedFabricCategories = useMemo(() => {
+    return form.categoryIds
+      .map((id) => {
+        const category = flatCategories.find((item) => item.id === id);
+        if (!category) {
+          return null;
+        }
+
+        return {
+          id,
+          label: categoryPathById.get(id) ?? category.name,
+        };
+      })
+      .filter((category): category is { id: string; label: string } => category !== null)
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [categoryPathById, flatCategories, form.categoryIds]);
+
   const isSubmitDisabled = useMemo(() => {
     return (
       saving ||
       productImageFiles.length === 0 ||
       !form.name.trim() ||
       !form.description.trim() ||
+      form.categoryIds.length === 0 ||
+      !form.fabricCategoryId ||
       !form.priceInInr ||
       Number(form.priceInInr) <= 0 ||
       Number(form.lengthInMeters) <= 0
@@ -1086,6 +1115,29 @@ export default function AdminPage() {
     }
   };
 
+  const deleteCategory = async (category: FlatCategoryOption) => {
+    if (!window.confirm(`Delete ${category.name}? This cannot be undone.`)) return;
+
+    try {
+      setCategoryDeletingId(category.id);
+      const response = await fetch(`${ADMIN_PROXY_BASE}/categories/${category.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to delete category");
+      }
+
+      await loadCategories();
+      setStatus("Category deleted");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to delete category");
+    } finally {
+      setCategoryDeletingId(null);
+    }
+  };
+
   const persistProductCategories = async (
     productId: string,
     categoryIds: string[],
@@ -1130,9 +1182,7 @@ export default function AdminPage() {
     const ancestorIds = categoryHierarchyMaps.ancestorIdsById.get(categoryId) ?? [];
     const descendantIds = categoryHierarchyMaps.descendantIdsById.get(categoryId) ?? [];
 
-    updateField(
-      "categoryIds",
-      (() => {
+    const nextCategoryIds = (() => {
         const next = new Set(form.categoryIds);
 
         if (checked) {
@@ -1155,8 +1205,15 @@ export default function AdminPage() {
         }
 
         return [...next];
-      })(),
-    );
+      })();
+
+    setForm((previous) => ({
+      ...previous,
+      categoryIds: nextCategoryIds,
+      fabricCategoryId: nextCategoryIds.includes(previous.fabricCategoryId)
+        ? previous.fabricCategoryId
+        : "",
+    }));
   };
 
   const toggleInventoryProductCategory = (
@@ -1216,8 +1273,7 @@ export default function AdminPage() {
         body: JSON.stringify({
           name: form.name.trim(),
           description: form.description.trim(),
-          fabric: form.fabric,
-          craft: form.craft,
+          fabricCategoryId: form.fabricCategoryId,
           lengthInMeters: Number(form.lengthInMeters),
           blouseIncluded: form.blouseIncluded,
           hasHandloomMark: form.hasHandloomMark,
@@ -1243,6 +1299,7 @@ export default function AdminPage() {
         ...prev,
         name: "",
         description: "",
+        fabricCategoryId: "",
         priceInInr: "",
         categoryIds: [],
       }));
@@ -1574,7 +1631,7 @@ export default function AdminPage() {
   };
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 px-4 pb-24 pt-8 sm:px-6 lg:px-8">
+    <main className="mx-auto max-w-[1600px] space-y-6 px-4 pb-24 pt-8 sm:px-6 lg:px-8">
       <header className="space-y-1">
         <h1 className="font-serif text-4xl text-ink">Admin Dashboard</h1>
         <p className="text-sm text-[#6b625b]">
@@ -1583,10 +1640,10 @@ export default function AdminPage() {
       </header>
 
       <nav className="rounded-2xl border border-[#e8ddcf] bg-white/80 p-2 shadow-sm backdrop-blur">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
           <button
             type="button"
-            onClick={() => setActiveTab("overview")}
+            onClick={() => selectAdminTab("overview")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "overview"
                 ? "bg-wine text-white"
@@ -1597,7 +1654,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("add-product")}
+            onClick={() => selectAdminTab("add-product")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "add-product"
                 ? "bg-wine text-white"
@@ -1608,7 +1665,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("add-color")}
+            onClick={() => selectAdminTab("add-color")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "add-color"
                 ? "bg-wine text-white"
@@ -1619,7 +1676,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("inventory")}
+            onClick={() => selectAdminTab("inventory")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "inventory"
                 ? "bg-wine text-white"
@@ -1630,7 +1687,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("pieces")}
+            onClick={() => selectAdminTab("pieces")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "pieces"
                 ? "bg-wine text-white"
@@ -1641,7 +1698,7 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("orders")}
+            onClick={() => selectAdminTab("orders")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
               activeTab === "orders"
                 ? "bg-wine text-white"
@@ -1652,14 +1709,14 @@ export default function AdminPage() {
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab("categories")}
+            onClick={() => selectAdminTab("general-info")}
             className={`rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
-              activeTab === "categories"
+              activeTab === "general-info"
                 ? "bg-wine text-white"
                 : "bg-[#f7f1e8] text-[#5b5149]"
             }`}
           >
-            Categories
+            General Info
           </button>
         </div>
       </nav>
@@ -1700,7 +1757,7 @@ export default function AdminPage() {
             </p>
             <button
               type="button"
-              onClick={() => setActiveTab("inventory")}
+              onClick={() => selectAdminTab("inventory")}
               className="mt-3 rounded-full bg-wine px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white"
             >
               Open Inventory
@@ -1710,8 +1767,8 @@ export default function AdminPage() {
       ) : null}
 
       {activeTab !== "overview" ? (
-      <div className="grid gap-6 lg:grid-cols-[minmax(320px,420px)_1fr] lg:items-start">
-        <div className="space-y-6 lg:sticky lg:top-6">
+      <div className="w-full space-y-6">
+        <div className="space-y-6">
           {activeTab === "add-product" ? (
           <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
             <h2 className="font-semibold">Add Item</h2>
@@ -1725,17 +1782,17 @@ export default function AdminPage() {
               />
               <div className="space-y-2 rounded-xl border border-[#e8ddcf] bg-[#fcf8f2] p-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#5b5149]">
-                  Categories (optional)
+                  Categories
                 </p>
                 <p className="text-[11px] text-[#6b625b]">
-                  Selecting a sub-category auto-selects all parents. Unselecting a parent removes its sub-categories.
+                  Select at least one category. Selecting a sub-category auto-selects all parents. Unselecting a parent removes its sub-categories.
                 </p>
                 {loadingCategories ? (
                   <p className="text-xs text-[#6b625b]">Loading categories...</p>
                 ) : null}
                 {!loadingCategories && flatCategories.length === 0 ? (
                   <p className="text-xs text-[#6b625b]">
-                    No categories yet. Create one in the Categories tab.
+                    No categories yet. Create one in General Info.
                   </p>
                 ) : null}
                 {!loadingCategories && flatCategories.length > 0 ? (
@@ -1745,6 +1802,39 @@ export default function AdminPage() {
                       selectedCategoryIds={form.categoryIds}
                       onToggle={toggleDraftCategory}
                     />
+                  </div>
+                ) : null}
+                {selectedFabricCategories.length > 0 ? (
+                  <div className="space-y-2 border-t border-[#eadfce] pt-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#5c4a42]">
+                      Selected Category Hierarchy
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedFabricCategories.map((category) => (
+                        <span
+                          key={category.id}
+                          className="rounded-full border border-[#e4d9d0] bg-white px-2.5 py-1 text-[11px] text-[#5c4a42]"
+                        >
+                          {category.label}
+                        </span>
+                      ))}
+                    </div>
+                    <label className="grid gap-1 text-xs text-[#5c4a42]">
+                      Fabric category
+                      <select
+                        value={form.fabricCategoryId}
+                        onChange={(event) => updateField("fabricCategoryId", event.target.value)}
+                        required
+                        className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+                      >
+                        <option value="">Select from the hierarchy</option>
+                        {selectedFabricCategories.map((category) => (
+                          <option key={category.id} value={category.id}>
+                            {category.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 ) : null}
               </div>
@@ -1833,46 +1923,6 @@ export default function AdminPage() {
                   })}
                 </div>
               ) : null}
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={form.fabric}
-                  onChange={(event) =>
-                    updateField(
-                      "fabric",
-                      event.target.value as ProductForm["fabric"],
-                    )
-                  }
-                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-                >
-                  <option value="SILK">Silk</option>
-                  <option value="CHIFFON">Chiffon</option>
-                  <option value="COTTON">Cotton</option>
-                  <option value="GEORGETTE">Georgette</option>
-                  <option value="ORGANZA">Organza</option>
-                  <option value="LINEN">Linen</option>
-                  <option value="CREPE">Crepe</option>
-                  <option value="SATIN">Satin</option>
-                </select>
-                <select
-                  value={form.craft}
-                  onChange={(event) =>
-                    updateField(
-                      "craft",
-                      event.target.value as ProductForm["craft"],
-                    )
-                  }
-                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-                >
-                  <option value="BANARASI">Banarasi</option>
-                  <option value="KANJEEVARAM">Kanjeevaram</option>
-                  <option value="BANDHANI">Bandhani</option>
-                  <option value="CHIKANKARI">Chikankari</option>
-                  <option value="PAITHANI">Paithani</option>
-                  <option value="PATOLA">Patola</option>
-                  <option value="JAMDANI">Jamdani</option>
-                  <option value="TUSSAR">Tussar</option>
-                </select>
-              </div>
               <textarea
                 value={form.description}
                 onChange={(event) =>
@@ -2167,51 +2217,92 @@ export default function AdminPage() {
           </section>
           ) : null}
 
-          {activeTab === "categories" ? (
-            <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
-              <h2 className="font-semibold">Create Category</h2>
-              <p className="mt-1 text-xs text-[#6b625b]">
-                Build one or many levels. Products can be uncategorized or mapped
-                to multiple categories.
-              </p>
-              <form onSubmit={createCategory} className="mt-3 space-y-3 text-sm">
-                <input
-                  type="text"
-                  value={categoryForm.name}
-                  onChange={(event) =>
-                    setCategoryForm((prev) => ({
-                      ...prev,
-                      name: event.target.value,
-                    }))
-                  }
-                  placeholder="Category name (e.g., Ilkal Sarees)"
-                  className="w-full rounded-xl border border-[#d7c9b7] p-2"
-                />
-                <select
-                  value={categoryForm.parentId}
-                  onChange={(event) =>
-                    setCategoryForm((prev) => ({
-                      ...prev,
-                      parentId: event.target.value,
-                    }))
-                  }
-                  className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
-                >
-                  <option value="">No parent (root category)</option>
-                  {flatCategories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {`${"\u00A0\u00A0".repeat(category.depth)}${category.name}`}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="submit"
-                  disabled={categorySaving}
-                  className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  {categorySaving ? "Saving..." : "Create Category"}
-                </button>
-              </form>
+          {activeTab === "general-info" ? (
+            <section className="mx-auto w-full max-w-5xl">
+              <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+                <h2 className="font-semibold">Categories</h2>
+                <p className="mt-1 text-xs text-[#6b625b]">
+                  Build the hierarchy used to classify products.
+                </p>
+                <form onSubmit={createCategory} className="mt-4 space-y-3 text-sm">
+                  <input
+                    type="text"
+                    value={categoryForm.name}
+                    onChange={(event) =>
+                      setCategoryForm((prev) => ({
+                        ...prev,
+                        name: event.target.value,
+                      }))
+                    }
+                    placeholder="Category name (e.g., Ilkal Sarees)"
+                    className="w-full rounded-xl border border-[#d7c9b7] p-2"
+                  />
+                  <select
+                    value={categoryForm.parentId}
+                    onChange={(event) =>
+                      setCategoryForm((prev) => ({
+                        ...prev,
+                        parentId: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
+                  >
+                    <option value="">No parent (root category)</option>
+                    {flatCategories.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {`${"\u00A0\u00A0".repeat(category.depth)}${category.name}`}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={categorySaving}
+                    className="w-full rounded-full bg-wine py-3 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {categorySaving ? "Saving..." : "Create Category"}
+                  </button>
+                </form>
+                <div className="mt-5 border-t border-[#eee5dc] pt-4">
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-[#5c4a42]">
+                    Category Hierarchy
+                  </h3>
+                  {loadingCategories ? (
+                    <p className="mt-3 text-xs text-[#6b625b]">Loading categories...</p>
+                  ) : null}
+                  {!loadingCategories && categories.length === 0 ? (
+                    <p className="mt-3 text-xs text-[#6b625b]">No categories yet.</p>
+                  ) : null}
+                  {!loadingCategories && categories.length > 0 ? (
+                    <div className="mt-3 space-y-2">
+                      {flatCategories.map((category) => (
+                        <div
+                          key={category.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-[#efe4d7] bg-[#fcf8f2] px-3 py-2 text-sm text-[#5b5149]"
+                          style={{ marginLeft: `${category.depth * 16}px` }}
+                        >
+                          <span className="min-w-0 break-words">
+                            {categoryPathById.get(category.id) ?? category.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void deleteCategory(category)}
+                            disabled={categoryDeletingId === category.id}
+                            aria-label={`Delete ${category.name}`}
+                            title={`Delete ${category.name}`}
+                            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            {categoryDeletingId === category.id ? (
+                              <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+                            ) : (
+                              <Trash2 aria-hidden="true" className="size-4" />
+                            )}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              </section>
             </section>
           ) : null}
         </div>
@@ -3105,32 +3196,6 @@ export default function AdminPage() {
           </section>
         ) : null}
 
-        {activeTab === "categories" ? (
-          <section className="space-y-2">
-            <h2 className="font-semibold">Category Hierarchy</h2>
-            {loadingCategories ? (
-              <p className="text-sm text-[#6b625b]">Loading categories...</p>
-            ) : null}
-            {!loadingCategories && categories.length === 0 ? (
-              <p className="rounded-xl border border-[#e8ddcf] bg-white px-3 py-2 text-sm text-[#6b625b]">
-                No categories yet.
-              </p>
-            ) : null}
-            {!loadingCategories && categories.length > 0 ? (
-              <div className="space-y-2 rounded-2xl border border-[#e8ddcf] bg-white p-3">
-                {flatCategories.map((category) => (
-                  <div
-                    key={category.id}
-                    className="rounded-lg border border-[#efe4d7] bg-[#fcf8f2] px-3 py-2 text-sm text-[#5b5149]"
-                    style={{ marginLeft: `${category.depth * 16}px` }}
-                  >
-                    {categoryPathById.get(category.id) ?? category.name}
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </section>
-        ) : null}
       </div>
       ) : null}
 

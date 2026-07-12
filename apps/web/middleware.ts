@@ -15,7 +15,9 @@ export async function middleware(request: NextRequest) {
       : undefined;
 
     if (!token || !mobile) {
-      return NextResponse.redirect(new URL("/login?callbackUrl=/admin", request.url));
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("callbackUrl", `${request.nextUrl.pathname}${request.nextUrl.search}`);
+      return NextResponse.redirect(loginUrl);
     }
 
     if (!isAdminMobile(mobile)) {

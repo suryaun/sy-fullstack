@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
-// Craft abbreviations for SKU prefixes (3 chars).
-const CRAFT_ABBR: Record<string, string> = {
+// Category abbreviations for SKU prefixes (3 chars).
+const CATEGORY_ABBR: Record<string, string> = {
   BANARASI: "BAN",
   KANJEEVARAM: "KAN",
   BANDHANI: "BDH",
@@ -23,21 +23,22 @@ function slugifyColor(name: string | null | undefined): string {
     .padEnd(4, "X");
 }
 
-// Color-level SKU: SY-{CRAFT3}-{SEQ4}-{BODY4}-{BORDER4}
+// Color-level SKU: SY-{CATEGORY3}-{SEQ4}-{BODY4}-{BORDER4}
 // e.g. SY-BAN-0042-CRIM-GOLD
 export function generateColorSku(params: {
-  craft: string;
+  categoryLabel: string;
   productSequenceNumber: number;
   colorName: string;
   borderColorName?: string | null;
 }): string {
-  const craftAbbr =
-    CRAFT_ABBR[params.craft] ??
-    params.craft.slice(0, 3).toUpperCase().padEnd(3, "X");
+  const categoryName = params.categoryLabel.split(" /").at(-1)?.trim() ?? params.categoryLabel;
+  const categoryAbbr =
+    CATEGORY_ABBR[categoryName.toUpperCase()] ??
+    categoryName.slice(0, 3).toUpperCase().padEnd(3, "X");
   const seq = String(params.productSequenceNumber).padStart(4, "0");
   const body = slugifyColor(params.colorName);
   const border = slugifyColor(params.borderColorName);
-  return `SY-${craftAbbr}-${seq}-${body}-${border}`;
+  return `SY-${categoryAbbr}-${seq}-${body}-${border}`;
 }
 
 // Piece-level serial: {COLOR_SKU}-{PIECE3}
