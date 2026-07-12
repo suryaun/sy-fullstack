@@ -69,7 +69,7 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOY_SA }}
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
-      - name: Build, publish, and deploy test release
+      - name: Configure Artifact Registry and validate image tags
         env:
           VERSION: ${{ inputs.version }}
         run: |
@@ -77,32 +77,75 @@ jobs:
           ar="${REGION}-docker.pkg.dev/${PROJECT}/${AR_REPO}"
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
           for image in api web; do
-            if gcloud artifacts docker images describe "${ar}/${image}:${VERSION}" --format='value(image_summary.digest)' >/dev/null 2>&1; then echo "${image}:${VERSION} already exists; version tags are immutable." >&2; exit 1; fi
+            if gcloud artifacts docker images describe "${ar}/${image}:${VERSION}" --format='value(image_summary.digest)' >/dev/null 2>&1; then
+              echo "${image}:${VERSION} already exists; version tags are immutable." >&2
+              exit 1
+            fi
           done
-          api_tag="${ar}/api:${VERSION}"
-          docker build --platform linux/amd64 --tag "$api_tag" apps/api
+          echo "AR=${ar}" >> "$GITHUB_ENV"
+
+      - name: Build API image
+        env:
+          VERSION: ${{ inputs.version }}
+        run: docker build --platform linux/amd64 --tag "$AR/api:${VERSION}" apps/api
+
+      - name: Publish API image
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          api_tag="$AR/api:${VERSION}"
           docker push "$api_tag"
           api_digest="$(gcloud artifacts docker images describe "$api_tag" --format='value(image_summary.digest)')"
-          api_image="${ar}/api@${api_digest}"
+          echo "API_IMAGE=${AR}/api@${api_digest}" >> "$GITHUB_ENV"
+
+      - name: Deploy API to test
+        run: |
+          set -euo pipefail
           api_env_vars="NODE_ENV=production"
           [[ -z "$API_RUNTIME_ENV_VARS" ]] || api_env_vars="${api_env_vars},${API_RUNTIME_ENV_VARS}"
-          gcloud run deploy "$API_SERVICE" --image="$api_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=4000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$api_env_vars" --set-secrets="$API_RUNTIME_SECRETS"
-          api_url="$(gcloud run services describe "$API_SERVICE" --region="$REGION" --format='value(status.url)')"
-          curl --fail --show-error --silent "${api_url}/health"
-          web_tag="${ar}/web:${VERSION}"
-          docker build --platform linux/amd64 --tag "$web_tag" apps/web
+          gcloud run deploy "$API_SERVICE" --image="$API_IMAGE" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=4000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$api_env_vars" --set-secrets="$API_RUNTIME_SECRETS"
+          echo "API_URL=$(gcloud run services describe "$API_SERVICE" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
+
+      - name: Check API health
+        run: curl --fail --show-error --silent "${API_URL}/health"
+
+      - name: Build web image
+        env:
+          VERSION: ${{ inputs.version }}
+        run: docker build --platform linux/amd64 --tag "$AR/web:${VERSION}" apps/web
+
+      - name: Publish web image
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          web_tag="$AR/web:${VERSION}"
           docker push "$web_tag"
           web_digest="$(gcloud artifacts docker images describe "$web_tag" --format='value(image_summary.digest)')"
-          web_image="${ar}/web@${web_digest}"
-          api_internal_url="${WEB_API_INTERNAL_URL:-${api_url}}"
+          echo "WEB_IMAGE=${AR}/web@${web_digest}" >> "$GITHUB_ENV"
+
+      - name: Deploy web to test
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          api_internal_url="${WEB_API_INTERNAL_URL:-${API_URL}}"
           admin_api_internal_url="${WEB_ADMIN_API_INTERNAL_URL:-${api_internal_url}}"
           web_env_vars="NODE_ENV=production,NEXT_PUBLIC_API_URL=${WEB_NEXT_PUBLIC_API_URL},API_INTERNAL_URL=${api_internal_url},ADMIN_API_INTERNAL_URL=${admin_api_internal_url},AUTH_URL=${WEB_AUTH_URL},NEXT_PUBLIC_RAZORPAY_KEY_ID=${WEB_NEXT_PUBLIC_RZP_KEY}"
           [[ -z "$WEB_NEXT_PUBLIC_BRAND_LOGO" ]] || web_env_vars="${web_env_vars},NEXT_PUBLIC_BRAND_LOGO=${WEB_NEXT_PUBLIC_BRAND_LOGO}"
           [[ -z "$WEB_RUNTIME_ENV_VARS" ]] || web_env_vars="${web_env_vars},${WEB_RUNTIME_ENV_VARS}"
-          gcloud run deploy "$WEB_SERVICE" --image="$web_image" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=3000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$web_env_vars,RELEASE_VERSION=${VERSION}" --set-secrets="$WEB_RUNTIME_SECRETS"
-          web_url="$(gcloud run services describe "$WEB_SERVICE" --region="$REGION" --format='value(status.url)')"
-          curl --fail --show-error --silent --location "$web_url" > /dev/null
-          printf 'Test deployment succeeded for %s\nAPI: %s\nWeb: %s\n' "$VERSION" "$api_image" "$web_image" >> "$GITHUB_STEP_SUMMARY"
+          gcloud run deploy "$WEB_SERVICE" --image="$WEB_IMAGE" --region="$REGION" --platform=managed --allow-unauthenticated --service-account="$RUNTIME_SERVICE_ACCOUNT" --port=3000 --cpu=1 --memory=512Mi --min-instances=0 --max-instances=4 --concurrency=80 --set-env-vars="$web_env_vars,RELEASE_VERSION=${VERSION}" --set-secrets="$WEB_RUNTIME_SECRETS"
+          echo "WEB_URL=$(gcloud run services describe "$WEB_SERVICE" --region="$REGION" --format='value(status.url)')" >> "$GITHUB_ENV"
+
+      - name: Check web health
+        run: curl --fail --show-error --silent --location "$WEB_URL" > /dev/null
+
+      - name: Write test deployment summary
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          printf 'Test deployment succeeded for %s\nAPI: %s\nWeb: %s\n' "$VERSION" "$API_IMAGE" "$WEB_IMAGE" >> "$GITHUB_STEP_SUMMARY"
 
   deploy-prod:
     name: Promote ${{ inputs.version }} to production
