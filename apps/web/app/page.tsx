@@ -7,12 +7,16 @@ type ApiHomeProduct = {
   name: string;
   description: string;
   fabric: string;
+  work: string;
+  occasion: string;
+  care: string;
   categoryLabel: string | null;
   lengthInMeters: number;
   blouseIncluded: boolean;
   priceInPaise: number;
+  originalPriceInPaise?: number | null;
   stockStatus: "IN_STOCK" | "SOLD_OUT";
-  imageUrl: string;
+  imageUrl: string | null;
   images?: Array<{ imageUrl: string; sortOrder?: number }>;
   colors?: Array<{
     id: string;
@@ -21,6 +25,7 @@ type ApiHomeProduct = {
     isDefault: boolean;
     stockQuantity: number;
     priceInPaise?: number | null;
+    originalPriceInPaise?: number | null;
     images?: Array<{ imageUrl: string; sortOrder?: number }>;
   }>;
   categories?: Array<{
@@ -68,26 +73,21 @@ async function getHomepageProducts(): Promise<CatalogProduct[]> {
               .slice()
               .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
               .map((image) => image.imageUrl)
-          : [product.imageUrl];
+          : product.imageUrl
+            ? [product.imageUrl]
+            : [];
 
       const availableColors =
-        product.colors && product.colors.length > 0
-          ? product.colors.map((color) => ({
+        (product.colors ?? []).map((color) => ({
               id: color.id,
               name: color.name,
               colorCode: color.colorCode,
               isDefault: color.isDefault,
               stockQuantity: color.stockQuantity,
               priceInPaise: color.priceInPaise,
+              originalPriceInPaise: color.originalPriceInPaise,
               images: (color.images ?? []).map((image) => image.imageUrl),
-            }))
-          : [
-              {
-                name: "Signature shade",
-                colorCode: null,
-                isDefault: true,
-              },
-            ];
+            }));
 
       const primaryColorTone =
         availableColors.find((color) => color.isDefault)?.name ??
@@ -104,19 +104,22 @@ async function getHomepageProducts(): Promise<CatalogProduct[]> {
         categoryLabel: product.categoryLabel,
         lengthInMeters: product.lengthInMeters,
         weight: "-",
-        work: "Curated handcrafted detailing",
+        work: product.work,
         colorTone: primaryColorTone,
         availableColors,
-        care: "Dry clean only",
-        occasion: "Festive and occasion wear",
+        care: product.care,
+        occasion: product.occasion,
         blouseIncluded: product.blouseIncluded,
         priceInPaise: product.priceInPaise,
+        originalPriceInPaise: product.originalPriceInPaise,
         stockStatus: product.stockStatus,
         categories: product.categories ?? [],
       };
     });
 
-    return mappedApiProducts;
+    return mappedApiProducts.filter(
+      (product) => (product.availableColors?.length ?? 0) > 0,
+    );
   } catch {
     return [];
   }

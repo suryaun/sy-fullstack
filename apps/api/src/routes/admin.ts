@@ -59,6 +59,8 @@ type CategoryCraftRow = CategoryRelationRow & {
   name: string;
 };
 
+type ProductOptionType = "WORK" | "OCCASION" | "CARE";
+
 type PrismaClientLike = Prisma.TransactionClient | typeof prisma;
 
 const DEFAULT_CATEGORY_BLUEPRINT: CategorySeedNode[] = [
@@ -74,6 +76,42 @@ const DEFAULT_CATEGORY_BLUEPRINT: CategorySeedNode[] = [
   }
 ];
 
+const PRODUCT_OPTION_TYPES: ProductOptionType[] = ["WORK", "OCCASION", "CARE"];
+const PRODUCT_DEFAULTS_ID = "product-defaults";
+const DEFAULT_PRODUCT_OPTIONS: Array<{
+  type: ProductOptionType;
+  name: string;
+  sortOrder: number;
+}> = [
+  { type: "WORK", name: "Handcrafted", sortOrder: 0 },
+  { type: "WORK", name: "Handloom", sortOrder: 1 },
+  { type: "WORK", name: "Handwoven", sortOrder: 2 },
+  { type: "WORK", name: "Zari work", sortOrder: 3 },
+  { type: "WORK", name: "Embroidery", sortOrder: 4 },
+  { type: "WORK", name: "Printed", sortOrder: 5 },
+  { type: "OCCASION", name: "Festive & occasion wear", sortOrder: 0 },
+  { type: "OCCASION", name: "Wedding", sortOrder: 1 },
+  { type: "OCCASION", name: "Casual wear", sortOrder: 2 },
+  { type: "OCCASION", name: "Office wear", sortOrder: 3 },
+  { type: "OCCASION", name: "Party wear", sortOrder: 4 },
+  { type: "OCCASION", name: "Gifting", sortOrder: 5 },
+  { type: "CARE", name: "Dry clean only", sortOrder: 0 },
+  { type: "CARE", name: "Gentle hand wash", sortOrder: 1 },
+  { type: "CARE", name: "Gentle machine wash", sortOrder: 2 },
+  { type: "CARE", name: "Professional cleaning recommended", sortOrder: 3 }
+];
+
+const DEFAULT_PRODUCT_DEFAULTS = {
+  lengthInMeters: 6.2,
+  blouseIncluded: true,
+  work: "Handcrafted",
+  occasion: "Festive & occasion wear",
+  care: "Dry clean only",
+  gstRatePercent: 5,
+  expensesInInr: 200,
+  expectedNetMarginPercent: 30
+};
+
 const adminProductSelect = Prisma.validator<Prisma.ProductSelect>()({
   id: true,
   name: true,
@@ -86,6 +124,11 @@ const adminProductSelect = Prisma.validator<Prisma.ProductSelect>()({
   packageHeightCm: true,
   weightGrams: true,
   sourcePincode: true,
+  work: true,
+  occasion: true,
+  care: true,
+  priceInPaise: true,
+  originalPriceInPaise: true,
   images: {
     orderBy: { sortOrder: "asc" },
     select: {
@@ -102,6 +145,8 @@ const adminProductSelect = Prisma.validator<Prisma.ProductSelect>()({
       name: true,
       stockQuantity: true,
       isDefault: true,
+      priceInPaise: true,
+      originalPriceInPaise: true,
       images: {
         orderBy: { sortOrder: "asc" },
         select: {
@@ -294,6 +339,24 @@ async function ensureDefaultCategories() {
   });
 }
 
+async function ensureDefaultProductOptions() {
+  await prisma.productOption.createMany({
+    data: DEFAULT_PRODUCT_OPTIONS,
+    skipDuplicates: true
+  });
+}
+
+async function ensureProductDefaults() {
+  return prisma.productDefaults.upsert({
+    where: { id: PRODUCT_DEFAULTS_ID },
+    update: {},
+    create: {
+      id: PRODUCT_DEFAULTS_ID,
+      ...DEFAULT_PRODUCT_DEFAULTS
+    }
+  });
+}
+
 function buildCategoryTree(categories: CategoryListItem[]) {
   const nodes = new Map<string, CategoryTreeNode>();
   for (const category of categories) {
@@ -455,6 +518,175 @@ router.delete("/categories/:id", requireAdmin, async (req, res) => {
   return res.status(204).send();
 });
 
+router.get("/product-options", requireAdmin, async (_req, res) => {
+  await ensureDefaultProductOptions();
+
+  const options = await prisma.productOption.findMany({
+    orderBy: [{ type: "asc" }, { sortOrder: "asc" }, { name: "asc" }]
+  });
+
+  return res.json(options);
+});
+
+router.get("/product-defaults", requireAdmin, async (_req, res) => {
+  await ensureDefaultProductOptions();
+  return res.json(await ensureProductDefaults());
+});
+
+router.patch("/product-defaults", requireAdmin, async (req, res) => {
+  await ensureDefaultProductOptions();
+  await ensureProductDefaults();
+
+  const {
+    lengthInMeters,
+    blouseIncluded,
+    work,
+    occasion,
+    care,
+    gstRatePercent,
+    expensesInInr,
+    expectedNetMarginPercent
+  } = req.body as Record<string, unknown>;
+
+  const normalizedLength = Number(lengthInMeters);
+  const normalizedGstRate = Number(gstRatePercent);
+  const normalizedExpenses = Number(expensesInInr);
+  const normalizedMargin = Number(expectedNetMarginPercent);
+  const normalizedWork = typeof work === "string" ? work.trim() : "";
+  const normalizedOccasion = typeof occasion === "string" ? occasion.trim() : "";
+  const normalizedCare = typeof care === "string" ? care.trim() : "";
+
+  if (!Number.isFinite(normalizedLength) || normalizedLength <= 0) {
+    return res.status(400).json({ message: "Default length must be greater than zero" });
+  }
+
+  if (typeof blouseIncluded !== "boolean") {
+    return res.status(400).json({ message: "Default blouse inclusion is required" });
+  }
+
+  if (
+    !Number.isInteger(normalizedGstRate) ||
+    normalizedGstRate < 0 ||
+    !Number.isInteger(normalizedExpenses) ||
+    normalizedExpenses < 0 ||
+    !Number.isInteger(normalizedMargin) ||
+    normalizedMargin < 0 ||
+    normalizedMargin >= 100
+  ) {
+    return res.status(400).json({ message: "Enter valid default pricing values" });
+  }
+
+  const selectedOptions = await prisma.productOption.findMany({
+    where: {
+      OR: [
+        { type: "WORK", name: normalizedWork },
+        { type: "OCCASION", name: normalizedOccasion },
+        { type: "CARE", name: normalizedCare }
+      ]
+    },
+    select: { type: true, name: true }
+  });
+
+  if (
+    !selectedOptions.some((option) => option.type === "WORK" && option.name === normalizedWork) ||
+    !selectedOptions.some((option) => option.type === "OCCASION" && option.name === normalizedOccasion) ||
+    !selectedOptions.some((option) => option.type === "CARE" && option.name === normalizedCare)
+  ) {
+    return res.status(400).json({ message: "Select valid default work, occasion, and care options" });
+  }
+
+  const updated = await prisma.productDefaults.update({
+    where: { id: PRODUCT_DEFAULTS_ID },
+    data: {
+      lengthInMeters: normalizedLength,
+      blouseIncluded,
+      work: normalizedWork,
+      occasion: normalizedOccasion,
+      care: normalizedCare,
+      gstRatePercent: normalizedGstRate,
+      expensesInInr: normalizedExpenses,
+      expectedNetMarginPercent: normalizedMargin
+    }
+  });
+
+  return res.json(updated);
+});
+
+router.post("/product-options", requireAdmin, async (req, res) => {
+  const { type, name } = req.body as { type?: string; name?: string };
+  const trimmedName = name?.trim();
+
+  if (!PRODUCT_OPTION_TYPES.includes(type as ProductOptionType)) {
+    return res.status(400).json({ message: "A valid product option type is required" });
+  }
+
+  if (!trimmedName) {
+    return res.status(400).json({ message: "Product option name is required" });
+  }
+
+  const optionType = type as ProductOptionType;
+  const existing = await prisma.productOption.findUnique({
+    where: { type_name: { type: optionType, name: trimmedName } },
+    select: { id: true }
+  });
+
+  if (existing) {
+    return res.status(409).json({ message: "This option already exists" });
+  }
+
+  const lastOption = await prisma.productOption.findFirst({
+    where: { type: optionType },
+    orderBy: { sortOrder: "desc" },
+    select: { sortOrder: true }
+  });
+  const created = await prisma.productOption.create({
+    data: {
+      type: optionType,
+      name: trimmedName,
+      sortOrder: (lastOption?.sortOrder ?? -1) + 1
+    }
+  });
+
+  return res.status(201).json(created);
+});
+
+router.delete("/product-options/:id", requireAdmin, async (req, res) => {
+  const optionId = asSingle(req.params.id);
+  if (!optionId) {
+    return res.status(400).json({ message: "Product option id is required" });
+  }
+
+  const option = await prisma.productOption.findUnique({ where: { id: optionId } });
+  if (!option) {
+    return res.status(404).json({ message: "Product option not found" });
+  }
+
+  const usageCount = await prisma.product.count({
+    where:
+      option.type === "WORK"
+        ? { work: option.name }
+        : option.type === "OCCASION"
+          ? { occasion: option.name }
+          : { care: option.name }
+  });
+
+  if (usageCount > 0) {
+    return res.status(409).json({ message: "This option is assigned to one or more products" });
+  }
+
+  const defaults = await ensureProductDefaults();
+  const optionIsDefault =
+    (option.type === "WORK" && defaults.work === option.name) ||
+    (option.type === "OCCASION" && defaults.occasion === option.name) ||
+    (option.type === "CARE" && defaults.care === option.name);
+  if (optionIsDefault) {
+    return res.status(409).json({ message: "This option is currently selected as an Add Product default" });
+  }
+
+  await prisma.productOption.delete({ where: { id: option.id } });
+  return res.status(204).send();
+});
+
 router.get("/products", requireAdmin, async (_req, res) => {
   const products = await prisma.product.findMany({
     orderBy: { createdAt: "desc" },
@@ -471,11 +703,15 @@ router.post("/products", requireAdmin, async (req, res) => {
     lengthInMeters,
     blouseIncluded,
     priceInPaise,
+    originalPriceInPaise,
     imageUrl,
     imagePublicId,
     imageUploads,
     categoryIds,
-    fabricCategoryId
+    fabricCategoryId,
+    work,
+    occasion,
+    care
   } = req.body;
 
   const normalizedCategoryIds = normalizeCategoryIds(categoryIds);
@@ -492,9 +728,21 @@ router.post("/products", requireAdmin, async (req, res) => {
 
   const coverImageUrl = uploads[0]?.imageUrl ?? imageUrl;
   const coverImagePublicId = uploads[0]?.imagePublicId ?? imagePublicId;
+  await ensureDefaultProductOptions();
+  const productOptions = await prisma.productOption.findMany({
+    where: { type: { in: PRODUCT_OPTION_TYPES } },
+    select: { type: true, name: true }
+  });
+  const normalizedWork = typeof work === "string" ? work.trim() : "";
+  const normalizedOccasion = typeof occasion === "string" ? occasion.trim() : "";
+  const normalizedCare = typeof care === "string" ? care.trim() : "";
 
-  if (!coverImageUrl) {
-    return res.status(400).json({ message: "At least one product image is required" });
+  if (
+    !productOptions.some((option) => option.type === "WORK" && option.name === normalizedWork) ||
+    !productOptions.some((option) => option.type === "OCCASION" && option.name === normalizedOccasion) ||
+    !productOptions.some((option) => option.type === "CARE" && option.name === normalizedCare)
+  ) {
+    return res.status(400).json({ message: "Select valid work, occasion, and care options" });
   }
 
   const allCategories = await prisma.category.findMany({
@@ -526,6 +774,18 @@ router.post("/products", requireAdmin, async (req, res) => {
     return res.status(400).json({ message: "Select a valid category" });
   }
 
+  if (!Number.isInteger(priceInPaise) || priceInPaise <= 0) {
+    return res.status(400).json({ message: "Selling price must be greater than zero" });
+  }
+
+  if (!Number.isInteger(originalPriceInPaise) || originalPriceInPaise <= 0) {
+    return res.status(400).json({ message: "Non-discounted price must be greater than zero" });
+  }
+
+  if (originalPriceInPaise < priceInPaise) {
+    return res.status(400).json({ message: "Non-discounted price cannot be lower than selling price" });
+  }
+
   const createdProduct = await prisma.$transaction(async (tx) => {
     const created = await tx.product.create({
       data: {
@@ -533,10 +793,13 @@ router.post("/products", requireAdmin, async (req, res) => {
         description,
         fabric,
         craft,
+        work: normalizedWork,
+        occasion: normalizedOccasion,
+        care: normalizedCare,
         lengthInMeters,
         blouseIncluded,
-        hasHandloomMark: Boolean(req.body.hasHandloomMark),
         priceInPaise,
+        originalPriceInPaise,
         imageUrl: coverImageUrl,
         imagePublicId: coverImagePublicId,
         instagramReelUrl: req.body.instagramReelUrl ?? null,
@@ -804,6 +1067,7 @@ router.post("/products/:id/colors", requireAdmin, async (req, res) => {
     isDefault,
     stockQuantity,
     priceInPaise,
+    originalPriceInPaise,
     imageUrls,
     imageUploads
   } = req.body as {
@@ -814,6 +1078,7 @@ router.post("/products/:id/colors", requireAdmin, async (req, res) => {
     isDefault?: boolean;
     stockQuantity?: number;
     priceInPaise?: number;
+    originalPriceInPaise?: number;
     imageUrls?: string[];
     imageUploads?: Array<{ imageUrl: string; imagePublicId?: string }>;
   };
@@ -828,7 +1093,13 @@ router.post("/products/:id/colors", requireAdmin, async (req, res) => {
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, craft: true, sequenceNumber: true }
+    select: {
+      id: true,
+      craft: true,
+      sequenceNumber: true,
+      priceInPaise: true,
+      originalPriceInPaise: true
+    }
   });
 
   if (!product) {
@@ -843,6 +1114,23 @@ router.post("/products/:id/colors", requireAdmin, async (req, res) => {
   });
 
   const normalizedQty = Math.max(0, Number(stockQuantity ?? 0));
+  const normalizedPriceInPaise =
+    typeof priceInPaise === "number" && Number.isInteger(priceInPaise) && priceInPaise > 0
+      ? priceInPaise
+      : null;
+  const normalizedOriginalPriceInPaise =
+    typeof originalPriceInPaise === "number" &&
+    Number.isInteger(originalPriceInPaise) &&
+    originalPriceInPaise > 0
+      ? originalPriceInPaise
+      : null;
+  const effectiveSellingPrice = normalizedPriceInPaise ?? product.priceInPaise;
+  const effectiveOriginalPrice = normalizedOriginalPriceInPaise ?? product.originalPriceInPaise;
+
+  if (effectiveOriginalPrice !== null && effectiveOriginalPrice < effectiveSellingPrice) {
+    return res.status(400).json({ message: "Non-discounted price cannot be lower than selling price" });
+  }
+
   const existingColorCount = await prisma.productColor.count({ where: { productId } });
   const shouldBeDefault = isDefault === true || existingColorCount === 0;
 
@@ -864,7 +1152,8 @@ router.post("/products/:id/colors", requireAdmin, async (req, res) => {
         sku,
         isDefault: shouldBeDefault,
         stockQuantity: normalizedQty,
-        priceInPaise: typeof priceInPaise === "number" ? priceInPaise : null
+        priceInPaise: normalizedPriceInPaise,
+        originalPriceInPaise: normalizedOriginalPriceInPaise
       }
     });
 
@@ -1533,7 +1822,7 @@ router.get("/orders/:id/invoice", requireAdmin, async (req, res) => {
       items: {
         include: {
           product: {
-            select: { id: true, name: true, fabric: true, craft: true, hasHandloomMark: true }
+            select: { id: true, name: true, fabric: true, craft: true }
           },
           productColor: {
             select: { id: true, name: true, sku: true, borderColorName: true }

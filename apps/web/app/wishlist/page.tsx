@@ -12,12 +12,15 @@ type ApiWishlistProduct = {
   name: string;
   description: string;
   fabric: string;
+  work: string;
+  occasion: string;
+  care: string;
   categoryLabel: string | null;
   lengthInMeters: number;
   blouseIncluded: boolean;
   priceInPaise: number;
   stockStatus: "IN_STOCK" | "SOLD_OUT";
-  imageUrl: string;
+  imageUrl: string | null;
   images?: Array<{ imageUrl: string; sortOrder?: number }>;
   colors?: Array<{
     id: string;
@@ -37,7 +40,9 @@ function mapApiProductToCatalog(product: ApiWishlistProduct): CatalogProduct {
           .slice()
           .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
           .map((image) => image.imageUrl)
-      : [product.imageUrl];
+      : product.imageUrl
+        ? [product.imageUrl]
+        : [];
 
   return {
     id: product.id,
@@ -49,10 +54,10 @@ function mapApiProductToCatalog(product: ApiWishlistProduct): CatalogProduct {
     categoryLabel: product.categoryLabel,
     lengthInMeters: product.lengthInMeters,
     weight: "-",
-    work: "Curated handcrafted detailing",
+    work: product.work,
     colorTone: "Curated shade",
-    care: "Dry clean only",
-    occasion: "Festive and occasion wear",
+    care: product.care,
+    occasion: product.occasion,
     blouseIncluded: product.blouseIncluded,
     priceInPaise: product.priceInPaise,
     stockStatus: product.stockStatus,

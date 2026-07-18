@@ -48,7 +48,7 @@ export async function markOrderAsPaidByRazorpayOrderId(input: {
             quantity: true,
             priceAtTime: true,
             product: {
-              select: { fabric: true, hasHandloomMark: true }
+              select: { fabric: true }
             }
           }
         }
@@ -105,9 +105,7 @@ export async function markOrderAsPaidByRazorpayOrderId(input: {
       const hsnCode = getHsnCode(item.product.fabric);
 
       const gst = calculateItemGst({
-        unitPriceInPaise: item.priceAtTime,
         lineTotalInPaise: lineTotal,
-        hasHandloomMark: item.product.hasHandloomMark,
         deliveryState
       });
 

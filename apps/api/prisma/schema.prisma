@@ -50,12 +50,15 @@ model Product {
   description     String
   fabric          String
   craft           String
+  work            String      @default("Handcrafted")
+  occasion        String      @default("Festive & occasion wear")
+  care            String      @default("Dry clean only")
   lengthInMeters  Float
   blouseIncluded  Boolean     @default(false)
-  hasHandloomMark Boolean     @default(false)
   priceInPaise    Int
+  originalPriceInPaise Int?
   stockStatus     StockStatus @default(IN_STOCK)
-  imageUrl        String
+  imageUrl        String?
   imagePublicId   String?
   instagramReelUrl String?
   hidden          Boolean     @default(false)
@@ -79,6 +82,32 @@ model Product {
 
   @@index([stockStatus])
   @@index([hidden])
+}
+
+model ProductOption {
+  id        String   @id @default(cuid())
+  type      String
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([type, name])
+  @@index([type, sortOrder])
+}
+
+model ProductDefaults {
+  id                       String   @id @default("product-defaults")
+  lengthInMeters           Float    @default(6.2)
+  blouseIncluded           Boolean  @default(true)
+  work                     String   @default("Handcrafted")
+  occasion                 String   @default("Festive & occasion wear")
+  care                     String   @default("Dry clean only")
+  gstRatePercent           Int      @default(5)
+  expensesInInr            Int      @default(200)
+  expectedNetMarginPercent Int      @default(30)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
 }
 
 model Category {
@@ -134,6 +163,7 @@ model ProductColor {
   isDefault       Boolean              @default(false)
   stockQuantity   Int                  @default(0)
   priceInPaise    Int?
+  originalPriceInPaise Int?
   isActive        Boolean              @default(true)
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt

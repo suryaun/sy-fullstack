@@ -21,6 +21,8 @@ type AdminColor = {
   borderColorName?: string;
   stockQuantity: number;
   isDefault: boolean;
+  priceInPaise: number | null;
+  originalPriceInPaise: number | null;
   images?: AdminImage[];
 };
 
@@ -111,11 +113,35 @@ type FlatCategoryOption = {
   parentId: string | null;
   depth: number;
 };
+type ProductOptionType = "WORK" | "OCCASION" | "CARE";
+
+type AdminProductOption = {
+  id: string;
+  type: ProductOptionType;
+  name: string;
+  sortOrder: number;
+};
+
+type AdminProductDefaults = {
+  lengthInMeters: number;
+  blouseIncluded: boolean;
+  work: string;
+  occasion: string;
+  care: string;
+  gstRatePercent: number;
+  expensesInInr: number;
+  expectedNetMarginPercent: number;
+};
 
 type AdminProduct = {
   id: string;
   name: string;
   stockStatus: StockState;
+  work: string;
+  occasion: string;
+  care: string;
+  priceInPaise: number;
+  originalPriceInPaise: number | null;
   images?: AdminImage[];
   colors: AdminColor[];
   categories: AdminProductCategory[];
@@ -127,8 +153,15 @@ type ProductForm = {
   fabricCategoryId: string;
   lengthInMeters: string;
   blouseIncluded: boolean;
-  hasHandloomMark: boolean;
+  work: string;
+  occasion: string;
+  care: string;
   priceInInr: string;
+  originalPriceInInr: string;
+  basePriceInInr: string;
+  gstRatePercent: string;
+  expensesInInr: string;
+  expectedNetMarginPercent: string;
   categoryIds: string[];
 };
 
@@ -139,6 +172,8 @@ type ColorForm = {
   borderColorName: string;
   borderColorCode: string;
   stockQuantity: string;
+  priceInInr: string;
+  originalPriceInInr: string;
   isDefault: boolean;
 };
 
@@ -153,6 +188,12 @@ const ADMIN_TABS: AdminTab[] = [
   "pieces",
   "orders",
 ];
+
+const PRODUCT_OPTION_LABELS: Record<ProductOptionType, string> = {
+  WORK: "Work",
+  OCCASION: "Occasion",
+  CARE: "Care",
+};
 
 function getAdminTabFromPathname(pathname: string): AdminTab {
   const tab = pathname.split("/")[2];
@@ -404,6 +445,17 @@ export default function AdminPage() {
   const previewUrlCacheRef = useRef<Map<File, string>>(new Map());
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [categories, setCategories] = useState<AdminCategoryNode[]>([]);
+  const [productOptions, setProductOptions] = useState<AdminProductOption[]>([]);
+  const [productDefaults, setProductDefaults] = useState<AdminProductDefaults>({
+    lengthInMeters: 6.2,
+    blouseIncluded: true,
+    work: "Handcrafted",
+    occasion: "Festive & occasion wear",
+    care: "Dry clean only",
+    gstRatePercent: 5,
+    expensesInInr: 200,
+    expectedNetMarginPercent: 30,
+  });
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingCategories, setLoadingCategories] = useState(true);
   const [stockUpdatingId, setStockUpdatingId] = useState<string | null>(null);
@@ -412,6 +464,9 @@ export default function AdminPage() {
   );
   const [categorySaving, setCategorySaving] = useState(false);
   const [categoryDeletingId, setCategoryDeletingId] = useState<string | null>(null);
+  const [productOptionSaving, setProductOptionSaving] = useState(false);
+  const [productOptionDeletingId, setProductOptionDeletingId] = useState<string | null>(null);
+  const [productDefaultsSaving, setProductDefaultsSaving] = useState(false);
   const [productCategorySavingId, setProductCategorySavingId] = useState<
     string | null
   >(null);
@@ -442,10 +497,17 @@ export default function AdminPage() {
     name: "",
     description: "",
     fabricCategoryId: "",
-    lengthInMeters: "5.5",
+    lengthInMeters: "6.2",
     blouseIncluded: true,
-    hasHandloomMark: false,
+    work: "Handcrafted",
+    occasion: "Festive & occasion wear",
+    care: "Dry clean only",
     priceInInr: "",
+    originalPriceInInr: "",
+    basePriceInInr: "",
+    gstRatePercent: "5",
+    expensesInInr: "200",
+    expectedNetMarginPercent: "30",
     categoryIds: [],
   });
   const [colorForm, setColorForm] = useState<ColorForm>({
@@ -455,6 +517,8 @@ export default function AdminPage() {
     borderColorName: "",
     borderColorCode: "",
     stockQuantity: "0",
+    priceInInr: "",
+    originalPriceInInr: "",
     isDefault: false,
   });
   const [activeTab, setActiveTab] = useState<AdminTab>(() => getAdminTabFromPathname(pathname));
@@ -468,6 +532,13 @@ export default function AdminPage() {
   }>({
     name: "",
     parentId: "",
+  });
+  const [productOptionForm, setProductOptionForm] = useState<{
+    type: ProductOptionType;
+    name: string;
+  }>({
+    type: "WORK",
+    name: "",
   });
 
   useEffect(() => {
@@ -564,24 +635,82 @@ export default function AdminPage() {
       .sort((left, right) => left.label.localeCompare(right.label));
   }, [categoryPathById, flatCategories, form.categoryIds]);
 
+  const calculatedSellingPriceInInr = useMemo(() => {
+    const basePrice = Number(form.basePriceInInr);
+    const expenses = Number(form.expensesInInr);
+    const gstRate = Number(form.gstRatePercent);
+    const margin = Number(form.expectedNetMarginPercent) / 100;
+
+    if (
+      !Number.isFinite(basePrice) ||
+      !Number.isFinite(expenses) ||
+      !Number.isFinite(gstRate) ||
+      !Number.isFinite(margin) ||
+      basePrice < 0 ||
+      expenses < 0 ||
+      gstRate < 0 ||
+      margin < 0 ||
+      margin >= 1
+    ) {
+      return null;
+    }
+
+    const calculatedPrice =
+      ((basePrice + expenses) / (1 - margin)) * (1 + gstRate / 100);
+    return Math.max(0, Math.round(calculatedPrice / 50) * 50 - 1);
+  }, [form.basePriceInInr, form.expensesInInr, form.expectedNetMarginPercent, form.gstRatePercent]);
+
+  const calculatedProfitInInr = useMemo(() => {
+    const basePrice = Number(form.basePriceInInr);
+    const expenses = Number(form.expensesInInr);
+    const gstRate = Number(form.gstRatePercent);
+
+    if (
+      calculatedSellingPriceInInr === null ||
+      !Number.isFinite(basePrice) ||
+      !Number.isFinite(expenses) ||
+      !Number.isFinite(gstRate)
+    ) {
+      return null;
+    }
+
+    const revenueBeforeGst = calculatedSellingPriceInInr / (1 + gstRate / 100);
+    return revenueBeforeGst - basePrice - expenses;
+  }, [calculatedSellingPriceInInr, form.basePriceInInr, form.expensesInInr, form.gstRatePercent]);
+
+  useEffect(() => {
+    if (calculatedSellingPriceInInr !== null) {
+      setForm((previous) => ({
+        ...previous,
+        priceInInr: String(calculatedSellingPriceInInr),
+      }));
+    }
+  }, [calculatedSellingPriceInInr]);
+
   const isSubmitDisabled = useMemo(() => {
     return (
       saving ||
-      productImageFiles.length === 0 ||
       !form.name.trim() ||
       !form.description.trim() ||
       form.categoryIds.length === 0 ||
       !form.fabricCategoryId ||
       !form.priceInInr ||
       Number(form.priceInInr) <= 0 ||
+      !form.originalPriceInInr ||
+      Number(form.originalPriceInInr) < Number(form.priceInInr) ||
       Number(form.lengthInMeters) <= 0
     );
-  }, [saving, productImageFiles.length, form]);
+  }, [saving, form]);
 
   const piecesColorOptions = useMemo(() => {
     const p = products.find((x) => x.id === piecesProductId);
     return p?.colors ?? [];
   }, [products, piecesProductId]);
+
+  const colorFormProduct = useMemo(
+    () => products.find((product) => product.id === colorForm.productId) ?? null,
+    [colorForm.productId, products],
+  );
 
   const inrFormatter = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2 });
   const formatInr = (paise: number) => inrFormatter.format(paise / 100);
@@ -716,7 +845,14 @@ export default function AdminPage() {
     const data = (await response.json()) as AdminProduct[];
     setProducts(data);
     if (data[0] && !colorForm.productId) {
-      setColorForm((prev) => ({ ...prev, productId: data[0].id }));
+      setColorForm((prev) => ({
+        ...prev,
+        productId: data[0].id,
+        priceInInr: String(data[0].priceInPaise / 100),
+        originalPriceInInr: data[0].originalPriceInPaise
+          ? String(data[0].originalPriceInPaise / 100)
+          : "",
+      }));
     }
   };
 
@@ -729,6 +865,54 @@ export default function AdminPage() {
 
     const data = (await response.json()) as AdminCategoryNode[];
     setCategories(data);
+  };
+
+  const loadProductOptions = async () => {
+    const response = await fetch(`${ADMIN_PROXY_BASE}/product-options`);
+
+    if (!response.ok) {
+      throw new Error("Unable to load product options");
+    }
+
+    const data = (await response.json()) as AdminProductOption[];
+    setProductOptions(data);
+    setForm((previous) => ({
+      ...previous,
+      work: data.some((option) => option.type === "WORK" && option.name === previous.work)
+        ? previous.work
+        : data.find((option) => option.type === "WORK")?.name ?? "",
+      occasion: data.some((option) => option.type === "OCCASION" && option.name === previous.occasion)
+        ? previous.occasion
+        : data.find((option) => option.type === "OCCASION")?.name ?? "",
+      care: data.some((option) => option.type === "CARE" && option.name === previous.care)
+        ? previous.care
+        : data.find((option) => option.type === "CARE")?.name ?? "",
+    }));
+  };
+
+  const applyProductDefaults = (defaults: AdminProductDefaults) => {
+    setForm((previous) => ({
+      ...previous,
+      lengthInMeters: String(defaults.lengthInMeters),
+      blouseIncluded: defaults.blouseIncluded,
+      work: defaults.work,
+      occasion: defaults.occasion,
+      care: defaults.care,
+      gstRatePercent: String(defaults.gstRatePercent),
+      expensesInInr: String(defaults.expensesInInr),
+      expectedNetMarginPercent: String(defaults.expectedNetMarginPercent),
+    }));
+  };
+
+  const loadProductDefaults = async () => {
+    const response = await fetch(`${ADMIN_PROXY_BASE}/product-defaults`);
+    if (!response.ok) {
+      throw new Error("Unable to load product defaults");
+    }
+
+    const defaults = (await response.json()) as AdminProductDefaults;
+    setProductDefaults(defaults);
+    applyProductDefaults(defaults);
   };
 
   useEffect(() => {
@@ -746,7 +930,12 @@ export default function AdminPage() {
       }
 
       try {
-        await Promise.all([loadProducts(), loadCategories()]);
+        await Promise.all([
+          loadProducts(),
+          loadCategories(),
+          loadProductOptions(),
+          loadProductDefaults(),
+        ]);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unable to load admin data";
@@ -1009,6 +1198,17 @@ export default function AdminPage() {
             borderColorCode: colorForm.borderColorCode.trim() || undefined,
             stockQuantity: Math.max(0, Number(colorForm.stockQuantity || 0)),
             isDefault: colorForm.isDefault,
+            priceInPaise:
+              colorFormProduct &&
+              Number(colorForm.priceInInr) !== colorFormProduct.priceInPaise / 100
+                ? Math.round(Number(colorForm.priceInInr) * 100)
+                : null,
+            originalPriceInPaise:
+              colorFormProduct &&
+              Number(colorForm.originalPriceInInr) !==
+                (colorFormProduct.originalPriceInPaise ?? 0) / 100
+                ? Math.round(Number(colorForm.originalPriceInInr) * 100)
+                : null,
             imageUploads: colorUploads,
           }),
         },
@@ -1024,6 +1224,8 @@ export default function AdminPage() {
         name: string;
         stockQuantity: number;
         isDefault: boolean;
+        priceInPaise: number | null;
+        originalPriceInPaise: number | null;
       };
 
       setProducts((previous) =>
@@ -1056,6 +1258,12 @@ export default function AdminPage() {
         borderColorName: "",
         borderColorCode: "",
         stockQuantity: "0",
+        priceInInr: colorFormProduct
+          ? String(colorFormProduct.priceInPaise / 100)
+          : "",
+        originalPriceInInr: colorFormProduct?.originalPriceInPaise
+          ? String(colorFormProduct.originalPriceInPaise / 100)
+          : "",
         isDefault: false,
       }));
       setColorImageFiles([]);
@@ -1135,6 +1343,87 @@ export default function AdminPage() {
       setStatus(error instanceof Error ? error.message : "Failed to delete category");
     } finally {
       setCategoryDeletingId(null);
+    }
+  };
+
+  const createProductOption = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = productOptionForm.name.trim();
+    if (!name) {
+      setStatus("Option name is required");
+      return;
+    }
+
+    try {
+      setProductOptionSaving(true);
+      const response = await fetch(`${ADMIN_PROXY_BASE}/product-options`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: productOptionForm.type, name }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to create product option");
+      }
+
+      await loadProductOptions();
+      setProductOptionForm((previous) => ({ ...previous, name: "" }));
+      setStatus("Product option created");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to create product option");
+    } finally {
+      setProductOptionSaving(false);
+    }
+  };
+
+  const deleteProductOption = async (option: AdminProductOption) => {
+    if (!window.confirm(`Delete ${option.name}? This cannot be undone.`)) return;
+
+    try {
+      setProductOptionDeletingId(option.id);
+      const response = await fetch(`${ADMIN_PROXY_BASE}/product-options/${option.id}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to delete product option");
+      }
+
+      await loadProductOptions();
+      setStatus("Product option deleted");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to delete product option");
+    } finally {
+      setProductOptionDeletingId(null);
+    }
+  };
+
+  const saveProductDefaults = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    try {
+      setProductDefaultsSaving(true);
+      const response = await fetch(`${ADMIN_PROXY_BASE}/product-defaults`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(productDefaults),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message ?? "Failed to update product defaults");
+      }
+
+      const defaults = (await response.json()) as AdminProductDefaults;
+      setProductDefaults(defaults);
+      applyProductDefaults(defaults);
+      setStatus("Add Product defaults updated");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Failed to update product defaults");
+    } finally {
+      setProductDefaultsSaving(false);
     }
   };
 
@@ -1252,18 +1541,18 @@ export default function AdminPage() {
   const createProduct = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (productImageFiles.length === 0) {
-      setStatus("Please select at least one product image");
-      return;
-    }
-
     try {
       setSaving(true);
-      setStatus("Optimizing and uploading product images...");
+      const uploadedImages =
+        productImageFiles.length > 0
+          ? await uploadManyImages(productImageFiles)
+          : [];
 
-      const uploadedImages = await uploadManyImages(productImageFiles);
-
-      setStatus("Creating product...");
+      setStatus(
+        uploadedImages.length > 0
+          ? "Creating product..."
+          : "Creating product without images...",
+      );
 
       const productRes = await fetch(`${ADMIN_PROXY_BASE}/products`, {
         method: "POST",
@@ -1276,8 +1565,11 @@ export default function AdminPage() {
           fabricCategoryId: form.fabricCategoryId,
           lengthInMeters: Number(form.lengthInMeters),
           blouseIncluded: form.blouseIncluded,
-          hasHandloomMark: form.hasHandloomMark,
+          work: form.work,
+          occasion: form.occasion,
+          care: form.care,
           priceInPaise: Math.round(Number(form.priceInInr) * 100),
+          originalPriceInPaise: Math.round(Number(form.originalPriceInInr) * 100),
           imageUrl: uploadedImages[0]?.imageUrl,
           imagePublicId: uploadedImages[0]?.imagePublicId,
           imageUploads: uploadedImages,
@@ -1300,7 +1592,17 @@ export default function AdminPage() {
         name: "",
         description: "",
         fabricCategoryId: "",
+        work: productDefaults.work,
+        occasion: productDefaults.occasion,
+        care: productDefaults.care,
         priceInInr: "",
+        originalPriceInInr: "",
+        basePriceInInr: "",
+        lengthInMeters: String(productDefaults.lengthInMeters),
+        blouseIncluded: productDefaults.blouseIncluded,
+        gstRatePercent: String(productDefaults.gstRatePercent),
+        expensesInInr: String(productDefaults.expensesInInr),
+        expectedNetMarginPercent: String(productDefaults.expectedNetMarginPercent),
         categoryIds: [],
       }));
     } catch (error) {
@@ -1773,13 +2075,15 @@ export default function AdminPage() {
           <section className="rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
             <h2 className="font-semibold">Add Item</h2>
             <form onSubmit={createProduct} className="mt-3 space-y-3 text-sm">
-              <input
-                type="text"
-                value={form.name}
-                onChange={(event) => updateField("name", event.target.value)}
-                placeholder="Product name"
-                className="w-full rounded-xl border border-[#d7c9b7] p-2"
-              />
+              <label className="grid gap-1 text-xs text-[#5b5149]">
+                <span>Product name</span>
+                <input
+                  type="text"
+                  value={form.name}
+                  onChange={(event) => updateField("name", event.target.value)}
+                  className="w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
+                />
+              </label>
               <div className="space-y-2 rounded-xl border border-[#e8ddcf] bg-[#fcf8f2] p-2">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#5b5149]">
                   Categories
@@ -1838,15 +2142,18 @@ export default function AdminPage() {
                   </div>
                 ) : null}
               </div>
-              <input
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={(event) =>
-                  setProductImageFiles(Array.from(event.target.files ?? []))
-                }
-                className="w-full rounded-xl border border-[#d7c9b7] p-2"
-              />
+              <label className="grid gap-1 text-xs text-[#5b5149]">
+                <span>Product images</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(event) =>
+                    setProductImageFiles(Array.from(event.target.files ?? []))
+                  }
+                  className="w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
+                />
+              </label>
               <p className="text-xs text-[#6b625b]">
                 Product images selected: {productImageFiles.length}
               </p>
@@ -1923,36 +2230,164 @@ export default function AdminPage() {
                   })}
                 </div>
               ) : null}
-              <textarea
-                value={form.description}
-                onChange={(event) =>
-                  updateField("description", event.target.value)
-                }
-                placeholder="Description"
-                className="h-24 w-full rounded-xl border border-[#d7c9b7] p-2"
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  value={form.lengthInMeters}
+              <label className="grid gap-1 text-xs text-[#5b5149]">
+                <span>Description</span>
+                <textarea
+                  value={form.description}
                   onChange={(event) =>
-                    updateField("lengthInMeters", event.target.value)
+                    updateField("description", event.target.value)
                   }
-                  placeholder="Length in meters"
-                  className="w-full rounded-xl border border-[#d7c9b7] p-2"
+                  className="h-24 w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
                 />
-                <input
-                  type="number"
-                  min="1"
-                  value={form.priceInInr}
-                  onChange={(event) =>
-                    updateField("priceInInr", event.target.value)
-                  }
-                  placeholder="Price in INR"
-                  className="w-full rounded-xl border border-[#d7c9b7] p-2"
-                />
+              </label>
+              <div>
+                <label className="grid gap-1 text-xs text-[#5b5149]">
+                  <span>Length in meters</span>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    value={form.lengthInMeters}
+                    onChange={(event) =>
+                      updateField("lengthInMeters", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
+                  />
+                </label>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <label className="grid gap-1 text-xs text-[#5b5149]">
+                  <span>Work</span>
+                  <select
+                    value={form.work}
+                    onChange={(event) => updateField("work", event.target.value)}
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                  >
+                    {productOptions.filter((option) => option.type === "WORK").map((option) => <option key={option.id} value={option.name}>{option.name}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs text-[#5b5149]">
+                  <span>Occasion</span>
+                  <select
+                    value={form.occasion}
+                    onChange={(event) => updateField("occasion", event.target.value)}
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                  >
+                    {productOptions.filter((option) => option.type === "OCCASION").map((option) => <option key={option.id} value={option.name}>{option.name}</option>)}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-xs text-[#5b5149]">
+                  <span>Care</span>
+                  <select
+                    value={form.care}
+                    onChange={(event) => updateField("care", event.target.value)}
+                    className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                  >
+                    {productOptions.filter((option) => option.type === "CARE").map((option) => <option key={option.id} value={option.name}>{option.name}</option>)}
+                  </select>
+                </label>
+              </div>
+              <section className="space-y-3 rounded-lg border border-dashed border-[#cdbda8] bg-[#f6f1ea] p-3.5">
+                <div className="flex items-baseline justify-between gap-3 border-b border-[#ded2c4] pb-2">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#806350]">Pricing helper</p>
+                    <h3 className="mt-0.5 text-sm font-semibold text-[#5c4a42]">Price Decider</h3>
+                  </div>
+                  <span className="text-right text-[11px] text-[#806350]">Net margin before GST</span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs text-[#5b5149]">
+                    <span>Base price</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={form.basePriceInInr}
+                      onChange={(event) => updateField("basePriceInInr", event.target.value)}
+                      placeholder="INR"
+                      className="w-full rounded-lg border border-[#d7c9b7] bg-white/75 p-2"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-[#5b5149]">
+                    <span>GST</span>
+                    <select
+                      value={form.gstRatePercent}
+                      onChange={(event) => updateField("gstRatePercent", event.target.value)}
+                      className="w-full rounded-lg border border-[#d7c9b7] bg-white/75 p-2"
+                    >
+                      <option value="0">0%</option>
+                      <option value="3">3%</option>
+                      <option value="5">5%</option>
+                      <option value="12">12%</option>
+                      <option value="18">18%</option>
+                      <option value="28">28%</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs text-[#5b5149]">
+                    <span>Expenses</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={form.expensesInInr}
+                      onChange={(event) => updateField("expensesInInr", event.target.value)}
+                      placeholder="INR"
+                      className="w-full rounded-lg border border-[#d7c9b7] bg-white/75 p-2"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-[#5b5149]">
+                    <span>Expected net margin</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="99"
+                      step="1"
+                      value={form.expectedNetMarginPercent}
+                      onChange={(event) => updateField("expectedNetMarginPercent", event.target.value)}
+                      placeholder="Percent"
+                      className="w-full rounded-lg border border-[#d7c9b7] bg-white/75 p-2"
+                    />
+                  </label>
+                </div>
+                <div className="grid gap-3 border-l-2 border-[#9b4c3e] bg-white/55 px-3 py-2 sm:grid-cols-2">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#806350]">Calculated selling price</p>
+                    <p className="mt-0.5 text-sm font-semibold text-[#5c4a42]">
+                      {calculatedSellingPriceInInr === null ? "Enter valid price inputs" : `₹${calculatedSellingPriceInInr.toLocaleString("en-IN")}`}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#806350]">Profit after GST, cost and expenses</p>
+                    <output className="mt-0.5 block text-sm font-semibold text-[#5c4a42]">
+                      {calculatedProfitInInr === null ? "Enter valid price inputs" : `₹${calculatedProfitInInr.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
+                    </output>
+                  </div>
+                </div>
+              </section>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="grid gap-1 text-xs text-[#5b5149]">
+                  <span>Selling price</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={form.priceInInr}
+                    onChange={(event) =>
+                      updateField("priceInInr", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-[#5b5149]">
+                  <span>Non-discounted price</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={form.originalPriceInInr}
+                    onChange={(event) => updateField("originalPriceInInr", event.target.value)}
+                    className="w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
+                    required
+                  />
+                </label>
               </div>
               <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-[#5b5149]">
                 <input
@@ -1963,16 +2398,6 @@ export default function AdminPage() {
                   }
                 />
                 Blouse Included
-              </label>
-              <label className="flex items-center gap-2 text-xs uppercase tracking-[0.14em] text-[#5b5149]">
-                <input
-                  type="checkbox"
-                  checked={form.hasHandloomMark}
-                  onChange={(event) =>
-                    updateField("hasHandloomMark", event.target.checked)
-                  }
-                />
-                Has Handloom Mark (0% GST)
               </label>
               <button
                 type="submit"
@@ -1991,12 +2416,18 @@ export default function AdminPage() {
             <form onSubmit={addColorVariant} className="mt-3 space-y-3 text-sm">
               <select
                 value={colorForm.productId}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const productId = event.target.value;
+                  const product = products.find((item) => item.id === productId);
                   setColorForm((prev) => ({
                     ...prev,
-                    productId: event.target.value,
-                  }))
-                }
+                    productId,
+                    priceInInr: product ? String(product.priceInPaise / 100) : "",
+                    originalPriceInInr: product?.originalPriceInPaise
+                      ? String(product.originalPriceInPaise / 100)
+                      : "",
+                  }));
+                }}
                 className="w-full rounded-xl border border-[#d7c9b7] bg-white p-2"
               >
                 <option value="">Select product</option>
@@ -2006,6 +2437,13 @@ export default function AdminPage() {
                   </option>
                 ))}
               </select>
+              {colorFormProduct ? (
+                <div className="grid gap-1 rounded-xl border border-[#e8ddcf] bg-[#fcf8f2] p-3 text-xs text-[#5b5149] sm:grid-cols-3">
+                  <p><span className="font-semibold text-[#4e4038]">Work:</span> {colorFormProduct.work}</p>
+                  <p><span className="font-semibold text-[#4e4038]">Occasion:</span> {colorFormProduct.occasion}</p>
+                  <p><span className="font-semibold text-[#4e4038]">Care:</span> {colorFormProduct.care}</p>
+                </div>
+              ) : null}
               <div className="space-y-3">
                 <ColorPickerInput
                   label="Body colour"
@@ -2050,6 +2488,39 @@ export default function AdminPage() {
                     }
                   />
                   Set as default
+                </label>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="grid gap-1 text-xs text-[#5b5149]">
+                  <span>Selling price</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={colorForm.priceInInr}
+                    onChange={(event) =>
+                      setColorForm((prev) => ({
+                        ...prev,
+                        priceInInr: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs text-[#5b5149]">
+                  <span>Non-discounted price</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={colorForm.originalPriceInInr}
+                    onChange={(event) =>
+                      setColorForm((prev) => ({
+                        ...prev,
+                        originalPriceInInr: event.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-[#d7c9b7] p-2 text-sm"
+                    required
+                  />
                 </label>
               </div>
               <input
@@ -2302,6 +2773,172 @@ export default function AdminPage() {
                     </div>
                   ) : null}
                 </div>
+              </section>
+              <section className="mt-6 rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+                <h2 className="font-semibold">Product Details</h2>
+                <p className="mt-1 text-xs text-[#6b625b]">
+                  Manage the Work, Occasion, and Care choices used when creating products.
+                </p>
+                <form onSubmit={createProductOption} className="mt-4 grid gap-2 sm:grid-cols-[150px_1fr_auto]">
+                  <select
+                    value={productOptionForm.type}
+                    onChange={(event) => setProductOptionForm((previous) => ({
+                      ...previous,
+                      type: event.target.value as ProductOptionType,
+                    }))}
+                    className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                  >
+                    {(Object.keys(PRODUCT_OPTION_LABELS) as ProductOptionType[]).map((type) => (
+                      <option key={type} value={type}>{PRODUCT_OPTION_LABELS[type]}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={productOptionForm.name}
+                    onChange={(event) => setProductOptionForm((previous) => ({ ...previous, name: event.target.value }))}
+                    placeholder="Add an option"
+                    className="rounded-xl border border-[#d7c9b7] p-2 text-sm"
+                  />
+                  <button
+                    type="submit"
+                    disabled={productOptionSaving}
+                    className="rounded-full bg-wine px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {productOptionSaving ? "Saving..." : "Add Option"}
+                  </button>
+                </form>
+                <div className="mt-5 grid gap-3 lg:grid-cols-3">
+                  {(Object.keys(PRODUCT_OPTION_LABELS) as ProductOptionType[]).map((type) => (
+                    <div key={type} className="rounded-xl border border-[#eee4d7] bg-[#fcf8f2] p-3">
+                      <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#5c4a42]">
+                        {PRODUCT_OPTION_LABELS[type]}
+                      </h3>
+                      <div className="mt-2 space-y-1.5">
+                        {productOptions.filter((option) => option.type === type).map((option) => (
+                          <div key={option.id} className="flex items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-2 text-xs text-[#5b5149]">
+                            <span className="min-w-0 break-words">{option.name}</span>
+                            <button
+                              type="button"
+                              onClick={() => void deleteProductOption(option)}
+                              disabled={productOptionDeletingId === option.id}
+                              aria-label={`Delete ${option.name}`}
+                              title={`Delete ${option.name}`}
+                              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              {productOptionDeletingId === option.id ? (
+                                <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 aria-hidden="true" className="size-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+              <section className="mt-6 rounded-2xl border border-[#e8ddcf] bg-white/70 p-4 shadow-sm backdrop-blur lg:p-5">
+                <h2 className="font-semibold">Add Product Defaults</h2>
+                <p className="mt-1 text-xs text-[#6b625b]">
+                  These values prefill each new product. They do not change existing products.
+                </p>
+                <form onSubmit={saveProductDefaults} className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <label className="grid gap-1 text-xs text-[#5b5149]">
+                    <span>Length in meters</span>
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value={productDefaults.lengthInMeters}
+                      onChange={(event) => setProductDefaults((previous) => ({ ...previous, lengthInMeters: Number(event.target.value) }))}
+                      className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-[#5b5149]">
+                    <span>Default work</span>
+                    <select
+                      value={productDefaults.work}
+                      onChange={(event) => setProductDefaults((previous) => ({ ...previous, work: event.target.value }))}
+                      className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                    >
+                      {productOptions.filter((option) => option.type === "WORK").map((option) => <option key={option.id} value={option.name}>{option.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-[#5b5149]">
+                    <span>Default occasion</span>
+                    <select
+                      value={productDefaults.occasion}
+                      onChange={(event) => setProductDefaults((previous) => ({ ...previous, occasion: event.target.value }))}
+                      className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                    >
+                      {productOptions.filter((option) => option.type === "OCCASION").map((option) => <option key={option.id} value={option.name}>{option.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-[#5b5149]">
+                    <span>Default care</span>
+                    <select
+                      value={productDefaults.care}
+                      onChange={(event) => setProductDefaults((previous) => ({ ...previous, care: event.target.value }))}
+                      className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                    >
+                      {productOptions.filter((option) => option.type === "CARE").map((option) => <option key={option.id} value={option.name}>{option.name}</option>)}
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-[#5b5149]">
+                    <span>Default GST</span>
+                    <select
+                      value={productDefaults.gstRatePercent}
+                      onChange={(event) => setProductDefaults((previous) => ({ ...previous, gstRatePercent: Number(event.target.value) }))}
+                      className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                    >
+                      <option value="0">0%</option>
+                      <option value="3">3%</option>
+                      <option value="5">5%</option>
+                      <option value="12">12%</option>
+                      <option value="18">18%</option>
+                      <option value="28">28%</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1 text-xs text-[#5b5149]">
+                    <span>Default expenses</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={productDefaults.expensesInInr}
+                      onChange={(event) => setProductDefaults((previous) => ({ ...previous, expensesInInr: Number(event.target.value) }))}
+                      className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-xs text-[#5b5149]">
+                    <span>Default expected net margin</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="99"
+                      step="1"
+                      value={productDefaults.expectedNetMarginPercent}
+                      onChange={(event) => setProductDefaults((previous) => ({ ...previous, expectedNetMarginPercent: Number(event.target.value) }))}
+                      className="rounded-xl border border-[#d7c9b7] bg-white p-2 text-sm"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 self-end rounded-xl border border-[#d7c9b7] bg-white px-3 py-2 text-xs text-[#5b5149]">
+                    <input
+                      type="checkbox"
+                      checked={productDefaults.blouseIncluded}
+                      onChange={(event) => setProductDefaults((previous) => ({ ...previous, blouseIncluded: event.target.checked }))}
+                    />
+                    Blouse included by default
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={productDefaultsSaving}
+                    className="self-end rounded-full bg-wine px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {productDefaultsSaving ? "Saving..." : "Save Defaults"}
+                  </button>
+                </form>
               </section>
             </section>
           ) : null}
