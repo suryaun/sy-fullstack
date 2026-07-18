@@ -77,6 +77,7 @@ const DEFAULT_CATEGORY_BLUEPRINT: CategorySeedNode[] = [
 ];
 
 const PRODUCT_OPTION_TYPES: ProductOptionType[] = ["WORK", "OCCASION", "CARE"];
+const PRODUCT_DEFAULTS_ID = "product-defaults";
 const DEFAULT_PRODUCT_OPTIONS: Array<{
   type: ProductOptionType;
   name: string;
@@ -99,6 +100,17 @@ const DEFAULT_PRODUCT_OPTIONS: Array<{
   { type: "CARE", name: "Gentle machine wash", sortOrder: 2 },
   { type: "CARE", name: "Professional cleaning recommended", sortOrder: 3 }
 ];
+
+const DEFAULT_PRODUCT_DEFAULTS = {
+  lengthInMeters: 6.2,
+  blouseIncluded: true,
+  work: "Handcrafted",
+  occasion: "Festive & occasion wear",
+  care: "Dry clean only",
+  gstRatePercent: 5,
+  expensesInInr: 200,
+  expectedNetMarginPercent: 30
+};
 
 const adminProductSelect = Prisma.validator<Prisma.ProductSelect>()({
   id: true,
@@ -334,6 +346,17 @@ async function ensureDefaultProductOptions() {
   });
 }
 
+async function ensureProductDefaults() {
+  return prisma.productDefaults.upsert({
+    where: { id: PRODUCT_DEFAULTS_ID },
+    update: {},
+    create: {
+      id: PRODUCT_DEFAULTS_ID,
+      ...DEFAULT_PRODUCT_DEFAULTS
+    }
+  });
+}
+
 function buildCategoryTree(categories: CategoryListItem[]) {
   const nodes = new Map<string, CategoryTreeNode>();
   for (const category of categories) {
@@ -505,6 +528,90 @@ router.get("/product-options", requireAdmin, async (_req, res) => {
   return res.json(options);
 });
 
+router.get("/product-defaults", requireAdmin, async (_req, res) => {
+  await ensureDefaultProductOptions();
+  return res.json(await ensureProductDefaults());
+});
+
+router.patch("/product-defaults", requireAdmin, async (req, res) => {
+  await ensureDefaultProductOptions();
+  await ensureProductDefaults();
+
+  const {
+    lengthInMeters,
+    blouseIncluded,
+    work,
+    occasion,
+    care,
+    gstRatePercent,
+    expensesInInr,
+    expectedNetMarginPercent
+  } = req.body as Record<string, unknown>;
+
+  const normalizedLength = Number(lengthInMeters);
+  const normalizedGstRate = Number(gstRatePercent);
+  const normalizedExpenses = Number(expensesInInr);
+  const normalizedMargin = Number(expectedNetMarginPercent);
+  const normalizedWork = typeof work === "string" ? work.trim() : "";
+  const normalizedOccasion = typeof occasion === "string" ? occasion.trim() : "";
+  const normalizedCare = typeof care === "string" ? care.trim() : "";
+
+  if (!Number.isFinite(normalizedLength) || normalizedLength <= 0) {
+    return res.status(400).json({ message: "Default length must be greater than zero" });
+  }
+
+  if (typeof blouseIncluded !== "boolean") {
+    return res.status(400).json({ message: "Default blouse inclusion is required" });
+  }
+
+  if (
+    !Number.isInteger(normalizedGstRate) ||
+    normalizedGstRate < 0 ||
+    !Number.isInteger(normalizedExpenses) ||
+    normalizedExpenses < 0 ||
+    !Number.isInteger(normalizedMargin) ||
+    normalizedMargin < 0 ||
+    normalizedMargin >= 100
+  ) {
+    return res.status(400).json({ message: "Enter valid default pricing values" });
+  }
+
+  const selectedOptions = await prisma.productOption.findMany({
+    where: {
+      OR: [
+        { type: "WORK", name: normalizedWork },
+        { type: "OCCASION", name: normalizedOccasion },
+        { type: "CARE", name: normalizedCare }
+      ]
+    },
+    select: { type: true, name: true }
+  });
+
+  if (
+    !selectedOptions.some((option) => option.type === "WORK" && option.name === normalizedWork) ||
+    !selectedOptions.some((option) => option.type === "OCCASION" && option.name === normalizedOccasion) ||
+    !selectedOptions.some((option) => option.type === "CARE" && option.name === normalizedCare)
+  ) {
+    return res.status(400).json({ message: "Select valid default work, occasion, and care options" });
+  }
+
+  const updated = await prisma.productDefaults.update({
+    where: { id: PRODUCT_DEFAULTS_ID },
+    data: {
+      lengthInMeters: normalizedLength,
+      blouseIncluded,
+      work: normalizedWork,
+      occasion: normalizedOccasion,
+      care: normalizedCare,
+      gstRatePercent: normalizedGstRate,
+      expensesInInr: normalizedExpenses,
+      expectedNetMarginPercent: normalizedMargin
+    }
+  });
+
+  return res.json(updated);
+});
+
 router.post("/product-options", requireAdmin, async (req, res) => {
   const { type, name } = req.body as { type?: string; name?: string };
   const trimmedName = name?.trim();
@@ -565,6 +672,15 @@ router.delete("/product-options/:id", requireAdmin, async (req, res) => {
 
   if (usageCount > 0) {
     return res.status(409).json({ message: "This option is assigned to one or more products" });
+  }
+
+  const defaults = await ensureProductDefaults();
+  const optionIsDefault =
+    (option.type === "WORK" && defaults.work === option.name) ||
+    (option.type === "OCCASION" && defaults.occasion === option.name) ||
+    (option.type === "CARE" && defaults.care === option.name);
+  if (optionIsDefault) {
+    return res.status(409).json({ message: "This option is currently selected as an Add Product default" });
   }
 
   await prisma.productOption.delete({ where: { id: option.id } });
